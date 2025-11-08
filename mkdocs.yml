@@ -1,0 +1,44 @@
+site_name: Java & Spring Master Notes — Senior Developer Edition
+site_description: Senior-level, interview-ready reference for Java 17 / Spring Boot 3 in production.
+site_url: https://balbayrakoglu.github.io/Notes/
+repo_url: https://github.com/balbayrakoglu/Notes
+repo_name: balbayrakoglu/Notes
+theme:
+  name: material
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+  language: en
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+      slugify: !!python/name:markdown.extensions.toc.slugify
+  - def_list
+  - tables
+  - attr_list
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+plugins:
+  - search
+nav:
+  - Home: index.md
+  - About: 00_About_Me.md
+  - Core Java: 01_Core_Java.md
+  - Spring Framework: 02_Spring_Framework.md
+  - Spring Boot & Microservices: 03_Spring_Boot_and_Microservices.md
+  - Messaging (Kafka & RabbitMQ): 04_Messaging_Kafka_RabbitMQ.md
+  - Caching & Redis: 05_Caching_and_Redis.md
+  - Data Access & Performance (JPA): 06_Data_Access_and_Performance_JPA.md
+  - System Design Essentials: 07_System_Design_Essentials.md
+  - Clean Code & Best Practices: 08_Clean_Code_and_Best_Practices.md
+  - Advanced Topics: 09_Advanced_Topics.md
+  - Quick Cheatsheets: 10_Quick_Cheatsheets.md
+  - Scenario-Style Interview Q&A: 11_Scenario_Interview_QA.md

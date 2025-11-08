@@ -1,31 +1,92 @@
-# Java & Spring Master Notes
+# 🧠 Java & Spring Master Notes — Senior Developer Edition
 
-Production-grade Java 17 + Spring Boot 3 notları.
-- [Core_Java](./01_Core_Java.md)
-- [Spring_Framework](./02_Spring_Framework.md)
-- [Spring_Boot_Microservices](./03_Spring_Boot_Microservices.md)
-- [Messaging_Kafka_RabbitMQ](./04_Messaging_Kafka_RabbitMQ.md)
-- [Caching_Redis](./05_Caching_Redis.md)
-- [Data_Access_Performance](./06_Data_Access_Performance.md)
-- [System_Design](./07_System_Design.md)
-- [Clean_Code_Practices](./08_Clean_Code_Practices.md)
-- [Advanced_Topics](./09_Advanced_Topics.md)
+## Core Java
+(şu anda elimizde hazır — JVM, Concurrency, Streams, Optional, Records, vs.)
+
+## Spring Framework
+(DI, Bean lifecycle, AOP, Transactions, Events, ConfigurationProperties, Circular dependency)
+
+## Spring Boot & Microservices
+(Auto-configuration, Profiles, Config Server, Circuit Breakers, CQRS, Saga, Outbox Pattern)
+
+## Messaging (Kafka & RabbitMQ)
+(Architecture, retries, DLQ, idempotency, exactly-once, schema evolution)
 
 
-## Table of Contents
 
-- [Overview](#overview)
-- [JVM Architecture & GC (JFR/JDK Tools)](#jvm-architecture-and-gc-jfrjdk-tools)
-- [Java Memory Model (JMM)](#java-memory-model-jmm)
-- [Concurrency Primitives & Patterns](#concurrency-primitives-and-patterns)
-- [Collections & Streams](#collections-and-streams)
-- [Exceptions & API Contracts](#exceptions-and-api-contracts)
-- [Performance Hygiene](#performance-hygiene)
-- [Examples](#examples)
-    - [CompletableFuture with Timeout & Retry](#completablefuture-with-timeout-and-retry)
-    - [Optimistic read with StampedLock](#optimistic-read-with-stampedlock)
+### Outbox — Multi-Node Concurrency (Race-Free)
 
----
+- **Batch seçiminde satır kilitleme:**
+  ```sql
+  SELECT id, aggregate_id, payload_json
+  FROM outbox
+  WHERE status = 'PENDING'
+  ORDER BY created_at
+  FOR UPDATE SKIP LOCKED
+  LIMIT 50;
+  ```
+  Birden fazla node aynı anda çalışsa bile **`SKIP LOCKED`** sayesinde aynı satır iki kez seçilmez.
+
+- **Idempotent publish:** `event_id` için **unique index** ve tüketici tarafında **Inbox (processed_events)** tablosu.
+- **Durum geçişi:** `PENDING → SENT/FAILED`; `retry_count` artışı; `FAILED` için ayrı **DLT/quarantine** akışı.
+
+
+
+### Kafka — `transactional.id` ve `transactionIdPrefix` (Spring)
+
+- **EOS (Exactly-Once Semantics)** için producer `transactional.id` benzersiz olmalı.
+- Spring Kafka'da:
+  ```java
+  kafkaTemplate.setTransactionIdPrefix("orders-svc-");
+  // her producer instance, prefix + rastgele ek ile benzersiz transactional.id üretir
+  ```
+- Aynı `transactional.id` ile birden fazla aktif producer **KULLANMAYIN** ( fencing ).
+
+## Caching & Redis
+(@Cacheable, TTL, eviction strategies, multi-level cache, cache stampede, serialization)
+
+
+
+### Transaction-Aware Cache & L1 Senkronizasyonu
+
+- **`TransactionAwareCacheManagerProxy`** ile cache yazmaları **commit sonrası** yapılır.
+- **L1 (Caffeine) → L2 (Redis)**: L2 güncellendiğinde **Pub/Sub invalidation** mesajı yayınlayın:
+  ```java
+  redisTemplate.convertAndSend("cache:invalidate", "prices:" + sku);
+  ```
+  Her node mesajı alıp kendi L1 girişini **evict** eder; böylece drift olmaz.
+
+## Data Access & Performance
+(JPA, fetch strategies, batch operations, N+1, locks, projections, connection pooling)
+
+
+
+### JPA İlişki Sahipliği — Hızlı Özet
+
+- **Owning side**: `@JoinColumn` bulunan taraf; DB foreign key'i burada tutulur.
+- **Inverse side**: `mappedBy` bulunan taraf; değişiklikler owning side üzerinden yapılır.
+- **Kural**: `@ManyToMany` yerine mümkünse **join-entity** kullanın (audit/ek kolonlar için esnek).
+
+## System Design Essentials
+(CAP, scalability, load balancing, distributed tracing, fault tolerance, caching layers)
+
+
+
+### Load Balancer Algoritmaları — Karşılaştırma
+
+| Algoritma              | Avantaj                               | Dezavantaj                          | Kullanım Durumu                     |
+|------------------------|----------------------------------------|-------------------------------------|-------------------------------------|
+| Round Robin            | Basit, eşit dağılım                    | Yük farklılıklarını gözetmez        | Homojen, kısa istekler              |
+| Weighted Round Robin   | Güçlü node’a daha çok trafik           | Ağırlıkların bakımı gerekli         | Heterojen node kapasiteleri         |
+| Least Connections      | Yoğun node’ları atlar                  | Uzun-süren bağlantılarda sapma      | Long-lived conn (WebSocket/gRPC)    |
+| Least Response Time    | Latency odaklı                         | Ölçüm gürültüsü etkilenebilir       | Dengesiz gecikmelerde               |
+| Consistent Hashing     | Sticky/anahtar-bağlı dağıtım           | Hot-key riski                        | Cache sharding, session stickiness  |
+
+## Clean Code & Best Practices
+(SOLID, logging, testing, CI/CD, versioning, documentation, security, performance)
+
+## Advanced Topics
+(Reactive, Security/OAuth2, Saga orchestration, Testcontainers, Terraform, Observability)
 
 # 🧠 Java & Spring Master Notes — Senior Developer Edition
 
@@ -263,7 +324,7 @@ try (var reader = Files.newBufferedReader(Path.of("data.txt"))) {
 - **VisualVM / Java Flight Recorder (JFR)**: Profiling memory and CPU usage.
 - **jstat -gc <pid> 1000**: Monitor GC behavior.
 - **Thread dumps**: Analyze deadlocks and contention.
- deadlocks
+  deadlocks
 
 # Spring Framework — Senior Developer Edition
 
@@ -2886,141 +2947,72 @@ try (var scope = span.makeCurrent()) {
 - Prefer **typed configuration**, **compile-time mappers**, **transactional outbox**, and **Inbox** dedup.
 - Keep flows **traceable** end-to-end with OpenTelemetry. Security is continuous — automate checks in CI/CD.
 
-# Scenario-Based Interview Q&A
+---
 
-> Short, realistic prompts with concise, senior-level answers. Tailored for Java 17 / Spring Boot 3, microservices, payments, and data platforms.
+# Java & Spring Master Notes
 
-## 1) Design a High-Availability Feature in a Cloud-Native System
-**Prompt:** You’re adding a new “scheduled payouts” feature to a payments platform. It must be scalable and fault-tolerant.
-**Answer (summary):**
-- **Data model:** Payout, PayoutRun, PayoutItem; state machine with immutable events.
-- **Scalability:** Stateless workers behind an autoscaling Deployment; idempotent handlers using `(businessKey, step)` constraint.
-- **Fault tolerance:** Outbox/Inbox + DLT; retries with backoff + jitter; TimeLimiter and CircuitBreaker per partner.
-- **Storage:** Postgres primary + read replica; keyset pagination for large scans.
-- **Reliability:** Blue/Green rollout; versioned contracts; shadow traffic.
-- **Observability:** Traces over HTTP+Kafka; metrics per stage; audit log of state transitions.
+Production-grade Java 17 + Spring Boot 3 notları.
+- [Core_Java](./01_Core_Java.md)
+- [Spring_Framework](./02_Spring_Framework.md)
+- [Spring_Boot_Microservices](./03_Spring_Boot_Microservices.md)
+- [Messaging_Kafka_RabbitMQ](./04_Messaging_Kafka_RabbitMQ.md)
+- [Caching_Redis](./05_Caching_Redis.md)
+- [Data_Access_Performance](./06_Data_Access_Performance.md)
+- [System_Design](./07_System_Design.md)
+- [Clean_Code_Practices](./08_Clean_Code_Practices.md)
+- [Advanced_Topics](./09_Advanced_Topics.md)
 
-## 2) Ensuring Idempotency (HTTP + MQ)
-**Prompt:** How do you avoid duplicate charges in payment processing?
-**Answer:**
-- **HTTP writes:** `Idempotency-Key` header → store `(op,key) → result` with TTL; return cached result on replay.
-- **Kafka:** Producer outbox with `eventId (UUID)`; consumer inbox table with unique `(eventId, handler)`. Ignore duplicates.
-- **DB:** Unique `(paymentIntentId, state)` where applicable; use `UPSERT` (ON CONFLICT) patterns.
 
-## 3) Concurrency Bug in Production
-**Prompt:** Intermittent double-refunds are reported after a deploy.
-**Answer:**
-- **Stabilize:** Freeze deploys; enable feature flag to stop refunds.
-- **Triage:** Query inbox/outbox for duplicate `refund.created` events; check logs by `traceId`.
-- **Fix:** Add `(eventId, handler)` unique index; wrap refund handler in a transaction; commit offset after DB commit.
-- **Backfill:** De-duplicate by latest state; replay DLT after patch.
-- **Postmortem:** Add contract test + chaos test for at-least-once delivery.
+# Core Java — Senior Developer Edition
 
-## 4) Data Store Fault Tolerance
-**Prompt:** How do you ensure fault tolerance for storage?
-**Answer:**
-- **RDBMS:** Synchronous replication (same AZ) + async cross-AZ; p99 latency budgets; connection pool guardrails.
-- **Cache:** L1 Caffeine + L2 Redis (Sentinel/Cluster). Transaction-aware cache → only write after DB commit.
-- **Backup/Restore:** PITR, immutable backups, restore drills, runbook for failover.
-- **Schema:** Online migrations, `NULL`-tolerant rollouts, additive first.
-
-## 5) Migrating to Virtual Threads
-**Prompt:** You’re evaluating virtual threads in a service with blocking IO.
-**Answer:**
-- Replace server executors with virtual-thread pools.
-- Audit ThreadLocal usage and remove thread-affinity assumptions.
-- Keep bounded queues for backpressure; don’t over-parallelize CPU-bound work.
-- Load test: compare throughput/latency vs platform threads.
-
-## 6) Kafka Exactly-Once Processing (EOS)
-**Prompt:** Process order events exactly once.
-**Answer:**
-- Enable idempotent producer + transactions; commit consumer offsets within the same transaction.
-- Use a stable `eventId`; downstream deduplicate via inbox unique key.
-- Avoid long transactions; keep batches small; monitor transactional aborts.
-
-## 7) Designing Rate Limits & Backpressure
-**Prompt:** Protect downstream partners with SLAs.
-**Answer:**
-- **Gateway:** Token-bucket limit per API key/tenant.
-- **Service:** Bulkhead isolation per client; TimeLimiter; adaptive concurrency.
-- **Queue:** Buffer with max TTL; shed load on saturation (429 + Retry-After).
-
-## 8) JPA N+1 in Hot Endpoint
-**Prompt:** A product listing endpoint is slow.
-**Answer:**
-- Replace entity graph with DTO projection query.
-- Add `default_batch_fetch_size` and explicit fetch joins for stable paths.
-- Cache read-only attributes; index FKs; verify `EXPLAIN ANALYZE` plan.
-
-## 9) Blue/Green with Backward-Compatible DB
-**Prompt:** Deploy a new column used by v2 only.
-**Answer:**
-1) Add nullable column; write by v2, ignore in v1.  
-2) Deploy app v2; dual-write if needed.  
-3) Backfill in background.  
-4) Flip reads to new column.  
-5) Remove legacy column in a later migration.
-
-## 10) Troubleshooting Stuck Outbox
-**Prompt:** Outbox publisher lags.
-**Answer:**
-- Use `FOR UPDATE SKIP LOCKED` with small batches + index on `(status, created_at)`.
-- Expose “oldest pending” metric; alert on lag.
-- Quarantine poison events after N retries and page owners.
+## Table of Contents
+- [Overview](#overview)
+- [JVM Architecture & GC (JFR/JDK Tools)](#jvm-architecture-and-gc-jfrjdk-tools)
+- [Java Memory Model (JMM)](#java-memory-model-jmm)
+- [Concurrency Primitives & Patterns](#concurrency-primitives-and-patterns)
+- [Collections & Streams](#collections-and-streams)
+- [Exceptions & API Contracts](#exceptions-and-api-contracts)
+- [Performance Hygiene](#performance-hygiene)
+- [Examples](#examples)
+    - [CompletableFuture with Timeout & Retry](#completablefuture-with-timeout-and-retry)
+    - [Optimistic read with StampedLock](#optimistic-read-with-stampedlock)
 
 ---
 
-## Behavioral / Leadership Mini Q&A
 
-**Q:** Your team resists adopting contract tests.  
-**A:** Start with a single critical integration; show a production incident that would’ve been prevented; provide a starter kit and CI template; make it the golden path; celebrate the first green build.
-
-**Q:** Handling a sev‑1 incident as on-call.  
-**A:** Stabilize (feature flags/rate limit), communicate ETA and blast radius, form a bridge with roles (lead/scribe/commander), rollback if needed, verify with synthetic checks, publish a blameless postmortem with 3 concrete action items.
-
-**Q:** Trade-off: Build vs Buy for observability.  
-**A:** Buy collection & storage (vendor/OSS) to move fast; build SLOs, dashboards, and alerts as productized templates; keep data ownership and egress cost in mind.
-
-
-
-<!-- ===== Auto-Appended from Readme1.md (missing sections) ===== -->
-
+## Overview
+JVM iç yapısı, Java Memory Model, concurrency primitifleri, koleksiyonlar, generics, streams, exception ve performans notları. Hedef: **Java 17** prod seviyesinde sağlam temel.
 
 ## JVM Architecture & GC (JFR/JDK Tools)
-
 - JIT (C2), on-stack replacement, escape analysis → gereksiz allocation azalt.
 - GC seçenekleri: G1 (default), ZGC/Shenandoah (düşük latency gereksinimi).
 - **JFR** ile method hotspot, alloc rate, safepoint süreleri izle.
 
-
+## Java Memory Model (JMM)
+- Görünürlük: `volatile` **yazar → okuyana flush**, reorder kısıtlar.
+- Atomicity: `Atomic*`/`LongAdder` sayaçlar; `synchronized` monitor kilidi.
+- Happens-before: lock acquire/release, thread start/join, volatile write→read.
 
 ## Concurrency Primitives & Patterns
-
 - **Executors**: bounded thread pools; virtual threads için `Executors.newVirtualThreadPerTaskExecutor()`.
 - **CompletableFuture**: compose/timeout; exceptional pipeline.
 - **Locks**: `ReentrantLock`, `StampedLock` (optimistic read), `ReadWriteLock`.
 - **Coordination**: `CountDownLatch`, `Semaphore`, `Phaser`.
 - **Immutable DTO**: paylaşılan veride tercih.
 
-
-
 ## Collections & Streams
-
 - `List/Set/Map` Big-O, iterasyon maliyeti; `ConcurrentHashMap` segmentless.
 - Streams: **stateless** vs **stateful** ara işlemler, **parallel()** sadece CPU-bound saf fonksiyonlarda.
 
-
-
 ## Exceptions & API Contracts
-
 - Checked sadece kurtarılabilir IO gibi durumlar; diğerleri unchecked.
 - API sınırında problem sözleşmesi; stack trace sızdırma yok.
 
-
+## Performance Hygiene
+- Kısa ömürlü objeleri azalt; `StringBuilder`/`record` kullan.
+- JMH ile mikro-benchmark; JFR ile gerçek yük profili.
 
 ## Examples
-
 
 ### CompletableFuture with Timeout & Retry
 ```java
@@ -3045,146 +3037,325 @@ class Point {
 }
 ```
 ---
+**Next →** [Spring_Framework](02_Spring_Framework.md)
 
+
+# Spring Framework — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Core DI & Lifecycle](#core-di-and-lifecycle)
+- [AOP & Transactional Sınırları](#aop-and-transactional-snrlar)
+- [Validation & Binding](#validation-and-binding)
+- [Events & Observers](#events-and-observers)
+- [Profiles & Conditional Beans](#profiles-and-conditional-beans)
+- [Examples](#examples)
+    - [Self Invocation Trap](#self-invocation-trap)
+    - [Typed Config with Validation](#typed-config-with-validation)
+
+---
+
+
+## Overview
+DI konteyneri, yaşam döngüsü, AOP, @ConfigurationProperties, profil ve event yapısı. Hedef: **Spring 6 / Boot 3** ile temiz, test edilebilir bean'ler.
 
 ## Core DI & Lifecycle
-
 - `@Configuration` + `@Bean` vs component scanning; explicit > implicit.
 - Bean lifecycle: post-processors → `@PostConstruct`/`InitializingBean` → `SmartLifecycle`.
 - Scope: singleton (default), prototype, request/session (web).
 
-
-
 ## AOP & Transactional Sınırları
-
 - Proxy tabanlı: **self-invocation** tuzağı (aynı bean içinden çağrı → advice çalışmaz).
 - `@Transactional` sadece **public** methodlarda ve proxy üzerinden etkin.
 
-
-
 ## Validation & Binding
-
 - `@ConfigurationProperties` + `@Validated` ile typed config.
 - Controller girişinde `@Valid`; method seviyesinde `@Validated`.
 
-
-
 ## Events & Observers
-
 - `ApplicationEventPublisher` ile domain event köprüsü (outbox’a giden yol).
 - Async event için `@Async` + ayrı executor.
 
-
-
 ## Profiles & Conditional Beans
-
 - `@Profile("prod")`/`@ConditionalOnProperty` ile çevresel varyantlar.
 - Default değerleri güvenli belirle; fail-fast yapılandır.
 
+## Examples
+
+### Self Invocation Trap
+```java
+@Service
+class A {
+  @Transactional public void m1(){ m2(); } // m2 transactional DEĞİL
+  @Transactional public void m2(){}
+}
+```
+
+### Typed Config with Validation
+```java
+@Validated @ConfigurationProperties("email")
+public record EmailProps(@Email String from, @Min(1) int poolSize) {}
+```
+---
+**← Previous:** [Core_Java](01_Core_Java.md)  
+**Next →** [Spring_Boot_Microservices](03_Spring_Boot_Microservices.md)
 
 
 # Spring Boot Microservices — Senior Developer Edition
 
+## Table of Contents
+- [Overview](#overview)
+- [Configuration & Secrets](#configuration-and-secrets)
+- [Health & Metrics](#health-and-metrics)
+- [HTTP Client (WebClient)](#http-client-webclient)
+- [API Gateway](#api-gateway)
+- [Observability](#observability)
+- [Containerization](#containerization)
+- [Examples](#examples)
+    - [WebClient with Timeouts](#webclient-with-timeouts)
+    - [Actuator Readiness Group](#actuator-readiness-group)
+
+---
 
 
+## Overview
+Boot auto-config, config management, health/metrics, gateway, resilience, containerization, config-per-env, feature flags.
+
+## Configuration & Secrets
+- `@ConfigurationProperties` + profiles; secrets Vault/Secrets Manager.
+- Immutable config objeleri; eksik config → fail-fast.
 
 ## Health & Metrics
-
 - Actuator: health groups, readiness/liveness; Micrometer → Prometheus.
 - Golden signals: latency p95/p99, error rate, saturation.
 
-
-
 ## HTTP Client (WebClient)
-
 - Connect/read timeouts, pool limits; Resilience4j ile timeout/retry/circuit.
 
+## API Gateway
+- Rate limiting (Redis), auth offloading, request/response rewrite.
 
+## Observability
+- OpenTelemetry (OTLP) exporter; traceId propagation.
 
 ## Containerization
-
 - Layered jars; distroless image; read-only FS; non-root user.
 
+## Examples
 
+### WebClient with Timeouts
+```java
+@Bean WebClient client(HttpClient hc){
+ return WebClient.builder().clientConnector(new ReactorClientHttpConnector(hc))
+        .build();
+}
+```
+
+### Actuator Readiness Group
+```yaml
+management.endpoint.health.group.readiness.include: db,kafka,redis
+```
+---
+**← Previous:** [Spring_Framework](02_Spring_Framework.md)  
+**Next →** [Messaging_Kafka_RabbitMQ](04_Messaging_Kafka_RabbitMQ.md)
+
+# Messaging — Kafka & RabbitMQ (Senior Developer Edition)
+
+## Table of Contents
+- [Overview](#overview)
+- [RabbitMQ](#rabbitmq)
+- [Kafka](#kafka)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+Asenkron iletişim, delivery semantics, idempotency, retry/DLT, publisher confirms, outbox/inbox.
+
+## RabbitMQ
+- Exchange→Queue→Consumer; manual ACK, prefetch.
+- TTL, DLX, DLQ ile gecikmeli tekrar ve zehirli mesaj park etme.
+- Publisher confirms + returns ile güvenli yayın.
 
 ## Kafka
-
 - Topics/partitions/offsets; consumer groups ve rebalance.
 - Idempotent producer + transactions (EOS).
 - Retry topics + DLT; schema registry ile evrim.
 
+## Examples
+```java
+@RabbitListener(queues="orders.q", concurrency="3-10") /* ... */
+```
+---
+**← Previous:** [Spring_Boot_Microservices](03_Spring_Boot_Microservices.md)  
+**Next →** [Caching_Redis](05_Caching_Redis.md)
 
+
+# Caching & Redis — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Spring Cache](#spring-cache)
+- [Redis](#redis)
+- [Patterns](#patterns)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+Spring Cache, Caffeine+Redis multi-level, TTL/LRU/LFU, stampede/avalanche, Redisson locks.
 
 ## Spring Cache
-
 - @Cacheable/@Put/@Evict; transaction-aware proxy.
 
-
-
 ## Redis
-
 - Json serializer; Pub/Sub invalidation; cluster/sentinel.
 
-
-
 ## Patterns
-
 - Negative cache, jitter TTL, single-flight.
 
+## Examples
+```java
+@Cacheable(cacheNames="prices", key="#sku", unless="#result==null")
+BigDecimal getPrice(String sku){/*...*/}
+```
+---
+**← Previous:** [Messaging_Kafka_RabbitMQ](04_Messaging_Kafka_RabbitMQ.md)  
+**Next →** [Data_Access_Performance](06_Data_Access_Performance.md)
 
+
+# Data Access & Performance — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Mappings](#mappings)
+- [N+1 Önleme](#n1-nleme)
+- [Pagination](#pagination)
+- [Transactions & Locking](#transactions-and-locking)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+JPA/Hibernate ilişkiler, N+1, fetch stratejisi, projections, batch/bulk, pagination, locking, Hikari, migrations, plans.
 
 ## Mappings
-
 - LAZY varsayılan; ManyToOne'u LAZY yap.
 - ManyToMany yerine join entity.
 
-
-
 ## N+1 Önleme
-
 - fetch join, entity graph, batch size.
 
-
+## Pagination
+- offset vs keyset.
 
 ## Transactions & Locking
-
 - @Transactional sınırları, optimistic/pessimistic.
 
+## Examples
+```java
+@EntityGraph(attributePaths={"orders"})
+Optional<Customer> findById(UUID id);
+```
+---
+**← Previous:** [Caching_Redis](05_Caching_Redis.md)  
+**Next →** [System_Design](07_System_Design.md)
+,
 
+
+# System Design — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Idempotency](#idempotency)
+- [Backpressure](#backpressure)
+- [Release](#release)
+- [Observability](#observability)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+CAP/BASE, consistency, idempotency, load balancing, backpressure, rate limiting, caching layers, sharding, releases, observability.
+
+## Idempotency
+- Keys + dedup store; outbox/inbox.
 
 ## Backpressure
-
 - Queues, bulkheads, timeouts, circuit breakers.
 
-
-
 ## Release
-
 - Blue/green, canary, rolling; DB forward/backward compatible.
 
+## Observability
+- RED/USE; tracing/logging.
 
+## Examples
+```yaml
+management.endpoints.web.exposure.include: health,metrics,prometheus
+```
+---
+**← Previous:** [Data_Access_Performance](06_Data_Access_Performance.md)  
+**Next →** [Clean_Code_Practices](08_Clean_Code_Practices.md)
+
+
+# Clean Code Practices — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Packaging](#packaging)
+- [Exceptions](#exceptions)
+- [Logging](#logging)
+- [Testing](#testing)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+SOLID, hexagonal, mapping, validation, exceptions, logging, testing, CI/CD.
 
 ## Packaging
-
 - package-by-feature + ports/adapters.
 
-
-
 ## Exceptions
-
 - Domain → unchecked; map to problem details.
 
-
-
 ## Logging
-
 - JSON logs, MDC correlation ids.
 
-
-
 ## Testing
-
 - Unit/slice/integration/e2e pyramid.
 
+## Examples
+```java
+record ApiError(String code, String message){}
+```
+---
+**← Previous:** [System_Design](07_System_Design.md)  
+**Next →** [Advanced_Topics](09_Advanced_Topics.md)
 
 
+
+# Advanced Topics — Senior Developer Edition
+
+## Table of Contents
+- [Overview](#overview)
+- [Examples](#examples)
+
+---
+
+
+## Overview
+Resilience4j ileri, MapStruct ileri, Kafka retry/DLT, Virtual Threads, Camunda/Workflow, Saga monitoring, OpenTelemetry, Security hardening.
+
+## Examples
+```java
+@Bean Executor vthreads(){ return Executors.newVirtualThreadPerTaskExecutor(); }
+```
+---
+**← Previous:** [Clean_Code_Practices](08_Clean_Code_Practices.md)
