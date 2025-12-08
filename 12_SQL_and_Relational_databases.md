@@ -265,5 +265,3 @@ CREATE INDEX idx_cities_country ON cities(country_id);
 * **Cardinality & stats** drive plans — keep **ANALYZE** / auto-stats on.
 
 ---
-
-If you want, I can try saving this as a downloadable file again, or split it into smaller topic files for your repo structure.
