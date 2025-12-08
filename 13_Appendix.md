@@ -68,7 +68,7 @@ This appendix serves as a complete directory to the **Java & Spring Master Notes
 *   Troubleshooting scenarios.
 *   Behavioral questions.
 
-### 🧩 [12. SQL & Relational Databases](12_SQL_and_Relational_databases.md)
+### 🧩 [12. SQL & Relational Databases](12_Sql_And_Relational_Databases.md)
 *   Advanced SQL queries (Window Functions, CTEs).
 *   Indexing strategies.
 *   Performance tuning tips.

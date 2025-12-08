@@ -8,7 +8,7 @@ _Senior Developer Edition — Java 17 / Spring Boot 3_
 ## Quick Start
 - **Appendix:** [Module Index](13_Appendix.md)
 - **Start here:** [About Me](00_About_Me.md)
-- **My Cv:** [Resume](https://balbayrakoglu.github.io/Resume)
+- **My Cv:** [Resume](BurakAlbayrakoglu_Resume.pdf)
 - **Most used:** [Core Java](01_Core_Java.md), [Spring Framework](02_Spring_Framework.md), [Spring Boot & Microservices](03_Spring_Boot_and_Microservices.md)
 - **Deep dives:** [Messaging (Kafka & RabbitMQ)](04_Messaging_Kafka_RabbitMQ.md), [Caching & Redis](05_Caching_and_Redis.md), [JPA Performance](06_Data_Access_and_Performance_JPA.md)
 - **Prep:** [System Design Essentials](07_System_Design_Essentials.md), [Quick Cheatsheets](10_Quick_Cheatsheets.md)
