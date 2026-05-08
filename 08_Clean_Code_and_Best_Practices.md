@@ -85,8 +85,8 @@ public interface OrderMapper {
 
 ```java
 public record CreateUserRequest(
-    @Email @NotBlank String email,
-    @Size(min = 8) String password
+        @Email @NotBlank String email,
+        @Size(min = 8) String password
 ) {}
 ```
 
@@ -111,7 +111,7 @@ class Errors {
     @ExceptionHandler(BusinessException.class)
     ResponseEntity<ApiError> onBusiness(BusinessException ex) {
         return ResponseEntity.unprocessableEntity()
-            .body(new ApiError("BUSINESS_ERROR", ex.getMessage()));
+                .body(new ApiError("BUSINESS_ERROR", ex.getMessage()));
     }
 }
 ```
@@ -129,7 +129,7 @@ class Errors {
 
 ```java
 try (MDC.MDCCloseable c1 = MDC.putCloseable("requestId", reqId)) {
-    log.info("Create order start orderId={}", orderId);
+        log.info("Create order start orderId={}", orderId);
 }
 ```
 
@@ -168,7 +168,7 @@ class OrderControllerTest {
     @Autowired MockMvc mvc;
     @Test void createsOrder() throws Exception {
         mvc.perform(post("/orders").contentType(APPLICATION_JSON).content("{...}"))
-           .andExpect(status().isCreated());
+                .andExpect(status().isCreated());
     }
 }
 ```
@@ -191,14 +191,14 @@ class OrderControllerTest {
 ```xml
 <!-- example: maven-surefire + failsafe for unit/integration separation -->
 <plugin>
-  <groupId>org.apache.maven.plugins</groupId>
-  <artifactId>maven-surefire-plugin</artifactId>
-  <version>3.2.5</version>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-surefire-plugin</artifactId>
+    <version>3.2.5</version>
 </plugin>
 <plugin>
-  <groupId>org.apache.maven.plugins</groupId>
-  <artifactId>maven-failsafe-plugin</artifactId>
-  <version>3.2.5</version>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-failsafe-plugin</artifactId>
+<version>3.2.5</version>
 </plugin>
 ```
 

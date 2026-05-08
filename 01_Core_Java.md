@@ -27,11 +27,11 @@ The Java Virtual Machine (JVM) provides an abstraction between compiled Java cod
 
 - **Class Loader Subsystem**: Loads `.class` files into memory and performs linking (verification, preparation, resolution).
 - **Runtime Data Areas**
-    - **Heap**: Stores objects and class instances (Young + Old Generation).
-    - **Stack**: Holds local variables and method call frames per thread.
-    - **Metaspace**: Stores class metadata (replaced PermGen).
-    - **PC Register**: Holds the current instruction address per thread.
-    - **Native Method Stack**: Used for JNI calls.
+  - **Heap**: Stores objects and class instances (Young + Old Generation).
+  - **Stack**: Holds local variables and method call frames per thread.
+  - **Metaspace**: Stores class metadata (replaced PermGen).
+  - **PC Register**: Holds the current instruction address per thread.
+  - **Native Method Stack**: Used for JNI calls.
 - **Execution Engine**: Includes the interpreter and JIT compiler for optimized native code.
 - **Garbage Collector (GC)**: Automatically manages object lifecycle. Modern collectors include **G1GC**, **ZGC**, and **Shenandoah**.
 
@@ -48,13 +48,13 @@ Defines how threads interact through memory and ensures visibility and ordering 
 volatile boolean flag = false;
 
 public void writer() {
-    flag = true; // write
+  flag = true; // write
 }
 
 public void reader() {
-    if (flag) { // guaranteed to see updated value
-        System.out.println("Visible to reader thread");
-    }
+  if (flag) { // guaranteed to see updated value
+    System.out.println("Visible to reader thread");
+  }
 }
 ```
 
@@ -69,38 +69,49 @@ public void reader() {
 ---
 
 ## Threading and Locks
-- **synchronized**: Ensures mutual exclusion and visibility.
-- **ReentrantLock**: Advanced locking (`tryLock`, fairness, interruptible, timed).
-- **ReadWriteLock**: Improves concurrency for read-heavy workloads.
-- **StampedLock**: Optimistic reads for read-mostly paths; validate stamp or fall back to write lock.
-- **ThreadLocal**: Provides thread-confined variables (use with care to avoid leaks).
-> **Tip — StampedLock optimistic reads**
+- **synchronized**: Simple mutual exclusion + visibility. Good default for small critical sections.
+- **ReentrantLock**: Use when you need `tryLock`, timeout, fairness, interruptible lock acquisition, or more control.
+- **ReadWriteLock**: Useful for read-heavy workloads where reads can run concurrently but writes need exclusivity.
+- **StampedLock**: Optimistic reads for read-mostly paths; always validate the stamp or fall back to a real read lock.
+- **ThreadLocal**: Thread-confined state; useful for request context/correlation IDs, but dangerous with pools if not cleared.
+
+### ReentrantLock — timed lock example
 ```java
+private final Lock lock = new ReentrantLock();
 
-Lock lock = new ReentrantLock(true);
-
-public void process() {
-
-var sl = new java.util.concurrent.locks.StampedLock();
-long stamp = sl.tryOptimisticRead();
-int localX = this.x;
-if (!sl.validate(stamp)) {
-    stamp = sl.readLock();
-    try { localX = this.x; } finally { sl.unlockRead(stamp); }
+public boolean process() throws InterruptedException {
+  if (!lock.tryLock(200, TimeUnit.MILLISECONDS)) {
+    return false; // fail fast instead of waiting forever
+  }
+  try {
+    // critical section
+    return true;
+  } finally {
+    lock.unlock();
+  }
 }
-// use localX
 ```
 
+### StampedLock — optimistic read example
+```java
+private final StampedLock lock = new StampedLock();
+private int x;
 
-    if (lock.tryLock()) {
-        try {
-            // critical section
-        } finally {
-            lock.unlock();
-        }
+public int readX() {
+  long stamp = lock.tryOptimisticRead();
+  int value = x;
+
+  if (!lock.validate(stamp)) {
+    stamp = lock.readLock();
+    try {
+      value = x;
+    } finally {
+      lock.unlockRead(stamp);
     }
+  }
+  return value;
 }
-
+```
 
 ---
 
@@ -111,8 +122,8 @@ Virtual threads are lightweight and reduce blocking cost in high-concurrency env
 
 ```java
 try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-    executor.submit(() -> System.out.println(Thread.currentThread()));
-}
+        executor.submit(() -> System.out.println(Thread.currentThread()));
+        }
 ```
 
 ---
@@ -122,12 +133,12 @@ Used for non-blocking asynchronous operations and composition of tasks.
 
 ```java
 CompletableFuture.supplyAsync(() -> fetchData())
-    .thenApply(this::transform)
+        .thenApply(this::transform)
     .thenAccept(System.out::println)
     .exceptionally(ex -> {
         log.error("Error occurred", ex);
         return null;
-    });
+                });
 ```
 
 - Use `thenCombine()` for merging tasks, `allOf()` for aggregation.
@@ -138,53 +149,274 @@ CompletableFuture.supplyAsync(() -> fetchData())
 - With `allOf`, collect results safely:
 ```java
 CompletableFuture<List<Result>> all =
-    CompletableFuture.allOf(f1, f2, f3)
-        .thenApply(v -> List.of(f1, f2, f3).stream()
-            .map(CompletableFuture::join)
-            .toList());
+        CompletableFuture.allOf(f1, f2, f3)
+                .thenApply(v -> List.of(f1, f2, f3).stream()
+                        .map(CompletableFuture::join)
+                        .toList());
 ```
-- Use `handle((res, ex) -> ...)` when you need both result and error.
+---
+
+## `equals()` and `hashCode()` — Interview Implementation Notes
+
+This is a common senior Java interview topic because it tests object identity, collection behavior, and memory/reference understanding. If someone says “implement `equals` and `hashCode`”, avoid random IDs, timestamps, or `System.identityHashCode()`. The implementation must be **stable** and based on the fields that define logical equality.
+
+### Mental model
+- `==` compares object references.
+- `equals()` compares logical equality.
+- `hashCode()` is used by hash-based collections like `HashMap`, `HashSet`, and `ConcurrentHashMap`.
+- If two objects are equal according to `equals()`, they **must** return the same `hashCode()`.
+- If two objects have the same hash code, they are **not necessarily equal**; collisions are allowed.
+- Never generate a random hash code. Hash code must remain stable while the object is used as a key.
+
+### Correct implementation example
+```java
+public final class Employee {
+  private final Long id;
+  private final String email;
+
+  public Employee(Long id, String email) {
+    this.id = id;
+    this.email = email;
+  }
+
+  public Long getId() {
+    return id;
+  }
+
+  public String getEmail() {
+    return email;
+  }
+
+  @Override
+  public boolean equals(Object obj) {
+    if (this == obj) {
+      return true;
+    }
+    if (!(obj instanceof Employee other)) {
+      return false;
+    }
+    return Objects.equals(id, other.id)
+            && Objects.equals(email, other.email);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(id, email);
+  }
+}
+```
+
+### Interview explanation
+“I first check reference equality because the same object is always equal to itself. Then I check type compatibility with `instanceof`. After that I compare the fields that define business equality using `Objects.equals` because it is null-safe. For `hashCode`, I use the same fields as `equals`. This keeps the equals/hashCode contract valid, especially when the object is used in `HashMap` or `HashSet`. I would not use random numbers because the hash code must be stable.”
+
+### Common pitfalls
+- Overriding `equals()` but not `hashCode()`.
+- Using mutable fields in `hashCode()` while the object is stored in a `HashSet` or used as a `HashMap` key.
+- Using database IDs before they are assigned, especially with JPA entities.
+- Using `getClass()` vs `instanceof` without understanding inheritance/proxy implications. With Hibernate proxies, `getClass()` can be problematic.
+- Thinking hash code must be unique. It does not; it only helps distribute objects into buckets.
+
+### JPA entity note
+For JPA entities, be careful with generated IDs. Before persistence, the ID may be `null`. A safer approach is often to use a stable natural key when one exists, or implement entity equality carefully based on your persistence lifecycle. Do not include lazy collections in `equals()`/`hashCode()`.
+
+---
+
+## HashMap, HashSet and `compute*` Methods
+
+### What happens inside `HashMap`?
+- `HashMap` calculates the key hash, chooses a bucket, then compares keys with `equals()`.
+- Good `hashCode()` distribution improves performance.
+- Bad hash distribution causes collisions. In modern Java, heavily-collided buckets can become tree bins, but you should still design keys properly.
+- `HashMap` is not thread-safe. Use `ConcurrentHashMap` for concurrent access.
+
+### `computeIfAbsent` — group values by key
+```java
+Map<String, List<String>> employeesByDepartment = new HashMap<>();
+
+employeesByDepartment
+        .computeIfAbsent("engineering", key -> new ArrayList<>())
+        .add("Burak");
+
+employeesByDepartment
+        .computeIfAbsent("engineering", key -> new ArrayList<>())
+        .add("Alice");
+```
+
+Without `computeIfAbsent`, you usually write verbose `containsKey/get/put` logic. In interviews, this is a clean way to show practical Java knowledge.
+
+### `compute` — update a counter
+```java
+Map<String, Integer> frequency = new HashMap<>();
+
+for (String word : List.of("java", "spring", "java")) {
+        frequency.compute(word, (key, oldValue) -> oldValue == null ? 1 : oldValue + 1);
+        }
+```
+
+### `merge` — simpler frequency counter
+```java
+Map<String, Integer> frequency = new HashMap<>();
+
+for (String word : List.of("java", "spring", "java")) {
+        frequency.merge(word, 1, Integer::sum);
+}
+```
+
+### `ConcurrentHashMap` note
+```java
+ConcurrentHashMap<String, LongAdder> counters = new ConcurrentHashMap<>();
+
+counters
+        .computeIfAbsent("orders.created", key -> new LongAdder())
+        .increment();
+```
+
+This avoids coarse locking and is a common production-style pattern for high-update counters.
 
 ---
 
 ## Immutability
-Immutable objects improve safety and thread-safety.
 
-Rules:
-- Fields are `private final`.
-- No setters.
-- Defensive copies for mutable fields.
-- Class declared `final`.
+Immutable objects improve safety, simplify reasoning, and are naturally thread-safe after proper construction. This topic often appears in senior interviews because it connects Java memory model, defensive copying, collections, DTO design, and object references.
 
+### Rules for an immutable class
+- Make the class `final` so it cannot be subclassed and mutated through inheritance.
+- Make fields `private final`.
+- Do not provide setters.
+- Validate constructor inputs.
+- Do not expose mutable internal objects directly.
+- Use defensive copies for mutable constructor arguments.
+- Return defensive copies or unmodifiable views from getters.
+- Do not let `this` escape from the constructor.
+
+### Basic immutable class
 ```java
 public final class User {
-    private final String name;
-    private final LocalDate createdAt;
+  private final String name;
+  private final LocalDate createdAt; // LocalDate is already immutable
 
-    public User(String name, LocalDate createdAt) {
-        this.name = name;
-        this.createdAt = createdAt;
+  public User(String name, LocalDate createdAt) {
+    this.name = Objects.requireNonNull(name);
+    this.createdAt = Objects.requireNonNull(createdAt);
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public LocalDate getCreatedAt() {
+    return createdAt;
+  }
+}
+```
+
+### Defensive copy with collections
+```java
+public final class Team {
+    private final String name;
+    private final List<String> members;
+
+    public Team(String name, List<String> members) {
+        this.name = Objects.requireNonNull(name);
+        this.members = List.copyOf(members); // defensive copy + unmodifiable
     }
 
-    public String getName() { return name; }
-    public LocalDate getCreatedAt() { return createdAt; }
+    public String getName() {
+        return name;
+    }
+
+    public List<String> getMembers() {
+        return members; // safe because List.copyOf created an unmodifiable list
+    }
 }
 ```
 
-Using Java 16+ Records:
+For immutable element types like `String`, `Integer`, `LocalDate`, returning the unmodifiable copied list is enough. You do not need to copy each element because the elements themselves cannot be mutated.
 
-> **Defensive copies** for mutable fields
+### Deep copy with mutable nested objects
+If the list contains mutable objects, copying only the list is not enough. The caller can still mutate the object reference inside the list.
+
 ```java
-public final class Report {
-  private final List<String> lines;
-  public Report(List<String> lines) { this.lines = List.copyOf(lines); }
-  public List<String> lines() { return List.copyOf(lines); }
+public final class Grade {
+  private final String course;
+  private final int score;
+
+  public Grade(String course, int score) {
+    this.course = Objects.requireNonNull(course);
+    this.score = score;
+  }
+
+  public Grade(Grade other) {
+    this(other.course, other.score);
+  }
+
+  public String getCourse() { return course; }
+  public int getScore() { return score; }
+}
+
+public final class Student {
+  private final String name;
+  private final List<Grade> grades;
+
+  public Student(String name, List<Grade> grades) {
+    this.name = Objects.requireNonNull(name);
+    this.grades = grades.stream()
+            .map(Grade::new)      // deep copy each element
+            .toList();            // unmodifiable in modern Java
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public List<Grade> getGrades() {
+    return grades.stream()
+            .map(Grade::new)      // protect internal state
+            .toList();
+  }
 }
 ```
 
+### Mutable object example: `Date`
+```java
+public final class Token {
+    private final Date expiresAt;
+
+    public Token(Date expiresAt) {
+        this.expiresAt = new Date(expiresAt.getTime()); // copy in constructor
+    }
+
+    public Date getExpiresAt() {
+        return new Date(expiresAt.getTime()); // copy in getter
+    }
+}
+```
+
+Prefer modern immutable date/time classes like `Instant`, `LocalDate`, and `ZonedDateTime` where possible.
+
+### Records are shallowly immutable
 ```java
 public record Product(String id, String name, BigDecimal price) {}
 ```
+
+Records make fields final and remove setters, but they do **not** automatically deep-copy mutable fields.
+
+```java
+public record OrderView(String orderId, List<String> items) {
+  public OrderView {
+    items = List.copyOf(items);
+  }
+}
+```
+
+### Interview answer
+“An immutable class is final, has private final fields, no setters, validates inputs, and protects mutable state with defensive copies. If the field is immutable, like `String` or `LocalDate`, returning it is fine. If the field is mutable, like `Date`, `List`, or a custom mutable object, I copy it in the constructor and also protect it in the getter. For nested mutable objects, I need deep copy, not only `List.copyOf`.”
+
+### Common mistakes
+- `final List<T>` does not mean the list contents are immutable. It only means the reference cannot point to another list.
+- `Collections.unmodifiableList(original)` is only a view. If the original list changes, the view reflects it. Prefer `List.copyOf(original)`.
+- Defensive copy of the list is not enough when elements are mutable.
+- Do not expose arrays directly; use `array.clone()` or convert to an immutable list.
 
 ---
 
@@ -207,9 +439,9 @@ Throwable
 
 ```java
 try {
-    process();
+process();
 } catch (IOException ex) {
-    throw new BusinessException("Failed to process", ex);
+        throw new BusinessException("Failed to process", ex);
 }
 ```
 
@@ -221,9 +453,9 @@ Streams provide declarative data processing.
 ```java
 List<Integer> list = List.of(1, 2, 3, 4, 5);
 int sum = list.stream()
-              .filter(n -> n % 2 == 0)
-              .mapToInt(Integer::intValue)
-              .sum();
+        .filter(n -> n % 2 == 0)
+        .mapToInt(Integer::intValue)
+        .sum();
 ```
 
 - Avoid modifying shared state in stream operations.
@@ -233,13 +465,13 @@ Example – Word frequency map:
 
 ```java
 Map<String, Long> frequency = words.stream()
-    .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
+        .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 ```
 
 **Merging to a Map with duplicates**
 ```java
 Map<String, Integer> totals = items.stream()
-  .collect(Collectors.toMap(Item::key, Item::value, Integer::sum));
+        .collect(Collectors.toMap(Item::key, Item::value, Integer::sum));
 ```
 
 ---
@@ -251,7 +483,7 @@ Used to avoid `NullPointerException` and make absence explicit.
 Optional.ofNullable(user)
     .map(User::getEmail)
     .filter(email -> email.endsWith("@company.com"))
-    .ifPresent(System.out::println);
+        .ifPresent(System.out::println);
 ```
 
 - Do not use `Optional` as a class field.
@@ -273,8 +505,8 @@ Autoboxing converts primitives to wrapper types automatically. Excessive boxing 
 ```java
 Integer counter = 0;
 for (int i = 0; i < 1_000_000; i++) {
-    counter += 1; // creates new Integer each iteration
-}
+counter += 1; // creates new Integer each iteration
+        }
 ```
 
 Prefer primitives in performance-critical sections.
@@ -288,7 +520,7 @@ Prefer primitives in performance-critical sections.
 
 ```java
 try (var reader = Files.newBufferedReader(Path.of("data.txt"))) {
-    return reader.readLine();
+        return reader.readLine();
 }
 ```
 

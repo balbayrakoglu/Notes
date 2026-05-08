@@ -43,7 +43,7 @@ public class ProductService {
 @Bean
 public KeyGenerator tenantAwareKeyGen() {
     return (target, method, params) -> "%s:%s:%s".formatted(
-        TenantContext.getTenantId(), method.getName(), Arrays.deepToString(params));
+            TenantContext.getTenantId(), method.getName(), Arrays.deepToString(params));
 }
 ```
 
@@ -64,9 +64,9 @@ class PriceService {
 @Bean
 public CacheManager caffeineCacheManager() {
     Caffeine<Object, Object> spec = Caffeine.newBuilder()
-        .maximumSize(50_000)
-        .expireAfterWrite(Duration.ofMinutes(30))
-        .recordStats();
+            .maximumSize(50_000)
+            .expireAfterWrite(Duration.ofMinutes(30))
+            .recordStats();
     return new CaffeineCacheManagerBuilder().fromCaffeine(spec).build();
 }
 ```
@@ -96,15 +96,169 @@ spring:
 @Bean
 public RedisCacheManager redisCacheManager(RedisConnectionFactory cf) {
     RedisCacheConfiguration conf = RedisCacheConfiguration.defaultCacheConfig()
-        .entryTtl(Duration.ofHours(1))
-        .disableCachingNullValues()
-        .serializeValuesWith(RedisSerializationContext.SerializationPair
-            .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+            .entryTtl(Duration.ofHours(1))
+            .disableCachingNullValues()
+            .serializeValuesWith(RedisSerializationContext.SerializationPair
+                    .fromSerializer(new GenericJackson2JsonRedisSerializer()));
     return RedisCacheManager.builder(cf).cacheDefaults(conf).build();
 }
 ```
 
 **Tip**: Use **separate cache managers** (local + Redis) if you design **multi‑level cache**.
+
+---
+
+## Redis Integration — Minimal Spring Boot Implementation
+
+This is the interview-friendly implementation flow: dependency → config → cache manager → service usage → invalidation.
+
+### 1) Dependency
+```xml
+<!-- pom.xml -->
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+</dependency>
+<dependency>
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+```
+
+### 2) Application config
+```yaml
+spring:
+  cache:
+    type: redis
+    redis:
+      time-to-live: 10m
+      cache-null-values: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+### 3) Cache configuration
+```java
+@Configuration
+@EnableCaching
+public class RedisCacheConfig {
+
+    @Bean
+    public RedisCacheManager redisCacheManager(RedisConnectionFactory connectionFactory) {
+        RedisCacheConfiguration defaultConfig = RedisCacheConfiguration
+                .defaultCacheConfig()
+                .entryTtl(Duration.ofMinutes(10))
+                .disableCachingNullValues()
+                .serializeKeysWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new StringRedisSerializer()))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair
+                        .fromSerializer(new GenericJackson2JsonRedisSerializer()));
+
+        Map<String, RedisCacheConfiguration> cacheConfigs = Map.of(
+                "products", defaultConfig.entryTtl(Duration.ofHours(1)),
+                "prices", defaultConfig.entryTtl(Duration.ofMinutes(5))
+        );
+
+        return RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(defaultConfig)
+                .withInitialCacheConfigurations(cacheConfigs)
+                .transactionAware()
+                .build();
+    }
+}
+```
+
+### 4) Service usage with `@Cacheable`, `@CachePut`, `@CacheEvict`
+```java
+@Service
+public class ProductService {
+    private final ProductRepository repository;
+
+    public ProductService(ProductRepository repository) {
+        this.repository = repository;
+    }
+
+    @Cacheable(cacheNames = "products", key = "#id")
+    public ProductDto getProduct(UUID id) {
+        return repository.findDtoById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+    }
+
+    @CachePut(cacheNames = "products", key = "#result.id()")
+    @Transactional
+    public ProductDto updateProduct(UpdateProductRequest request) {
+        Product product = repository.findById(request.id())
+                .orElseThrow(() -> new ProductNotFoundException(request.id()));
+
+        product.changeName(request.name());
+        Product saved = repository.save(product);
+
+        return ProductDto.from(saved);
+    }
+
+    @CacheEvict(cacheNames = "products", key = "#id")
+    @Transactional
+    public void deleteProduct(UUID id) {
+        repository.deleteById(id);
+    }
+}
+```
+
+### 5) Direct RedisTemplate usage
+Use this when you need Redis as a data structure store, not only as Spring Cache.
+
+```java
+@Configuration
+public class RedisTemplateConfig {
+
+    @Bean
+    public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(connectionFactory);
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setHashKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.afterPropertiesSet();
+        return template;
+    }
+}
+```
+
+```java
+@Service
+public class LoginAttemptService {
+    private final StringRedisTemplate redis;
+
+    public LoginAttemptService(StringRedisTemplate redis) {
+        this.redis = redis;
+    }
+
+    public long incrementFailedLogin(String email) {
+        String key = "login:failed:" + email;
+        Long count = redis.opsForValue().increment(key);
+        redis.expire(key, Duration.ofMinutes(15));
+        return count == null ? 0 : count;
+    }
+}
+```
+
+### Interview explanation
+“To integrate Redis in Spring Boot, I add `spring-boot-starter-cache` and `spring-boot-starter-data-redis`, enable caching with `@EnableCaching`, configure a `RedisCacheManager` with TTLs and serializers, then use `@Cacheable` for read-through caching, `@CachePut` for updates, and `@CacheEvict` for deletes. For counters, locks, rate limits, or Redis-specific structures, I use `StringRedisTemplate` or `RedisTemplate` directly. In production I also define TTL per domain, disable caching nulls unless negative caching is intentional, expose cache metrics, and avoid caching sensitive data.”
 
 ---
 
@@ -212,9 +366,9 @@ Use **Redisson** for reliable distributed locks (supports watchdog extensions).
 ```xml
 <!-- pom.xml -->
 <dependency>
-  <groupId>org.redisson</groupId>
-  <artifactId>redisson-spring-boot-starter</artifactId>
-  <version>3.27.2</version>
+    <groupId>org.redisson</groupId>
+    <artifactId>redisson-spring-boot-starter</artifactId>
+    <version>3.27.2</version>
 </dependency>
 ```
 
@@ -251,9 +405,9 @@ Use **Lua scripts** for atomic read‑modify‑write.
 
 ```java
 DefaultRedisScript<Long> script = new DefaultRedisScript<>(
-    "if redis.call('EXISTS', KEYS[1]) == 1 then " +
-    "  return redis.call('INCRBY', KEYS[1], ARGV[1]); " +
-    "else return nil end", Long.class);
+        "if redis.call('EXISTS', KEYS[1]) == 1 then " +
+                "  return redis.call('INCRBY', KEYS[1], ARGV[1]); " +
+                "else return nil end", Long.class);
 
 Long res = stringRedisTemplate.execute(script, List.of("counter:sku:123"), "1");
 ```

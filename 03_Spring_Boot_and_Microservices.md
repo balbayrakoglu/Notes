@@ -225,14 +225,14 @@ A central **Orchestrator** coordinates steps and **compensations**.
 
 ```java
 public void createOrderSaga(CreateOrder cmd) {
-  try {
-    reserveInventory(cmd);
-    chargePayment(cmd);
-    confirmOrder(cmd);
-  } catch (Exception ex) {
-    refundPayment(cmd);
-    releaseInventory(cmd);
-  }
+    try {
+        reserveInventory(cmd);
+        chargePayment(cmd);
+        confirmOrder(cmd);
+    } catch (Exception ex) {
+        refundPayment(cmd);
+        releaseInventory(cmd);
+    }
 }
 // On failure -> run compensations: refundPayment(), releaseInventory()
 ```
@@ -258,9 +258,77 @@ Guarantee that retried operations **do not create duplicates**.
 ```java
 public PaymentResponse charge(PaymentRequest req) {
     return dedupStore.computeIfAbsent(req.idempotencyKey(),
-        k -> gateway.charge(req));
+            k -> gateway.charge(req));
 }
 ```
+
+---
+
+
+## Redis in a Microservice Architecture
+
+Redis is usually not the source of truth. In a Spring Boot microservice, I use it as a distributed cache, rate-limit counter, short-lived dedup store, session/token store, or pub/sub mechanism for cache invalidation.
+
+### Typical Spring Boot setup
+
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-cache</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+```
+
+```java
+@EnableCaching
+@SpringBootApplication
+class OrdersApplication { }
+```
+
+```yaml
+spring:
+  cache:
+    type: redis
+    redis:
+      time-to-live: 30m
+      cache-null-values: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2s
+```
+
+### Service-layer usage
+
+```java
+@Service
+public class ProductQueryService {
+    private final ProductRepository repository;
+
+    public ProductQueryService(ProductRepository repository) {
+        this.repository = repository;
+    }
+
+    @Cacheable(cacheNames = "products", key = "#id")
+    public ProductDto getProduct(UUID id) {
+        return repository.findDtoById(id)
+            .orElseThrow(() -> new NotFoundException("Product not found"));
+    }
+
+    @CacheEvict(cacheNames = "products", key = "#id")
+    public void evictProduct(UUID id) {
+        // called after product update/delete
+    }
+}
+```
+
+### Interview explanation
+
+“In microservices, Redis is an optimization layer, not the system of record. I first write to the database, then update or evict cache entries. I define TTLs per domain, disable null caching unless I intentionally use negative caching, and monitor hit/miss ratio and memory usage. For multi-node deployments, if I use local L1 cache plus Redis L2, I publish invalidation events so every node evicts stale local entries.”
 
 ---
 
@@ -368,3 +436,69 @@ readinessProbe:
 - Immutable Docker images; version everything; automate via CI/CD.
 
 ---
+---
+
+## Interview Add-on: Redis in a Spring Boot Microservice
+
+This section connects the microservice architecture notes with the dedicated Redis/Caching chapter. In interviews, Redis is usually not discussed only as a library dependency; it is discussed as a design choice for latency, scalability, rate limiting, session/token state, distributed locks, cache invalidation, and failure handling.
+
+### Typical Spring Boot integration flow
+
+1. Add dependencies:
+
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-cache'
+implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+```
+
+2. Enable caching:
+
+```java
+@EnableCaching
+@SpringBootApplication
+public class App {
+    public static void main(String[] args) {
+        SpringApplication.run(App.class, args);
+    }
+}
+```
+
+3. Configure Redis connection and TTLs in `application.yml`:
+
+```yaml
+spring:
+  cache:
+    type: redis
+    redis:
+      time-to-live: 30m
+      cache-null-values: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+```
+
+4. Use cache annotations in the service layer, not in the controller:
+
+```java
+@Service
+public class ProductQueryService {
+
+    private final ProductRepository repository;
+
+    public ProductQueryService(ProductRepository repository) {
+        this.repository = repository;
+    }
+
+    @Cacheable(cacheNames = "products", key = "#id")
+    public ProductDto findById(UUID id) {
+        return repository.findDtoById(id)
+                .orElseThrow(() -> new ProductNotFoundException(id));
+    }
+}
+```
+
+### How to explain it in an interview
+
+“I use Redis when the data is read frequently, expensive to calculate or fetch, and can tolerate short-lived staleness. I configure TTLs per cache, disable null caching unless I intentionally want negative caching, and evict/update the cache on writes. For distributed systems, I also think about cache invalidation across nodes, metrics, serialization format, and what happens when Redis is unavailable. Redis improves latency, but the database remains the source of truth unless the use case is explicitly Redis-native, such as counters, rate limiting, or distributed locks.”
+

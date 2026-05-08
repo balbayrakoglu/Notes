@@ -94,206 +94,117 @@
 **Q:** Trade-off: Build vs Buy for observability.  
 **A:** Buy collection & storage (vendor/OSS) to move fast; build SLOs, dashboards, and alerts as productized templates; keep data ownership and egress cost in mind.
 
-
-
-<!-- ===== Auto-Appended from Readme1.md (missing sections) ===== -->
-
-
-## JVM Architecture & GC (JFR/JDK Tools)
-
-- JIT (C2), on-stack replacement, escape analysis → gereksiz allocation azalt.
-- GC seçenekleri: G1 (default), ZGC/Shenandoah (düşük latency gereksinimi).
-- **JFR** ile method hotspot, alloc rate, safepoint süreleri izle.
-
-
-
-## Concurrency Primitives & Patterns
-
-- **Executors**: bounded thread pools; virtual threads için `Executors.newVirtualThreadPerTaskExecutor()`.
-- **CompletableFuture**: compose/timeout; exceptional pipeline.
-- **Locks**: `ReentrantLock`, `StampedLock` (optimistic read), `ReadWriteLock`.
-- **Coordination**: `CountDownLatch`, `Semaphore`, `Phaser`.
-- **Immutable DTO**: paylaşılan veride tercih.
-
-
-
-## Collections & Streams
-
-- `List/Set/Map` Big-O, iterasyon maliyeti; `ConcurrentHashMap` segmentless.
-- Streams: **stateless** vs **stateful** ara işlemler, **parallel()** sadece CPU-bound saf fonksiyonlarda.
-
-
-
-## Exceptions & API Contracts
-
-- Checked sadece kurtarılabilir IO gibi durumlar; diğerleri unchecked.
-- API sınırında problem sözleşmesi; stack trace sızdırma yok.
-
-
-
-## Examples
-
-
-### CompletableFuture with Timeout & Retry
-```java
-static <T> T callWithRetry(Supplier<T> s, int max) {
-  for (int i=1;;i++) {
-    try { return CompletableFuture.supplyAsync(s).orTimeout(2, TimeUnit.SECONDS).join(); }
-    catch (CompletionException e) { if (i>=max) throw e; }
-  }
-}
-```
-
-### Optimistic read with StampedLock
-```java
-class Point {
-  private double x,y; private final StampedLock sl = new StampedLock();
-  double distance() {
-    long s = sl.tryOptimisticRead();
-    double cx = x, cy = y;
-    if (!sl.validate(s)) { s = sl.readLock(); try { cx = x; cy = y; } finally { sl.unlockRead(s);} }
-    return Math.hypot(cx, cy);
-  }
-}
-```
 ---
 
+## Java Core Live-Coding Scenarios
+
+### 1) Implement `equals()` and `hashCode()`
+
+**Prompt:** Implement `equals()` and `hashCode()` for an employee-like object.
+
+```java
+public final class Employee {
+    private final Long id;
+    private final String email;
+
+    public Employee(Long id, String email) {
+        this.id = id;
+        this.email = email;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof Employee other)) {
+            return false;
+        }
+        return Objects.equals(id, other.id)
+            && Objects.equals(email, other.email);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(id, email);
+    }
+}
+```
+
+**How to explain it in interview:**
+“I compare the same fields in both methods. `equals()` defines logical equality, while `hashCode()` helps hash-based collections find the right bucket. Equal objects must have the same hash code, but the same hash code does not guarantee equality. I would never use random values or mutable fields for hash code because the value must stay stable while the object is inside a `HashMap` or `HashSet`.”
+
+### 2) Design an immutable class with defensive copy
+
+**Prompt:** Create an immutable `Student` class with a list of grades.
+
+```java
+public final class Grade {
+    private final String course;
+    private final int score;
+
+    public Grade(String course, int score) {
+        this.course = Objects.requireNonNull(course);
+        this.score = score;
+    }
+
+    public Grade(Grade other) {
+        this(other.course, other.score);
+    }
+}
+
+public final class Student {
+    private final String name;
+    private final List<Grade> grades;
+
+    public Student(String name, List<Grade> grades) {
+        this.name = Objects.requireNonNull(name);
+        this.grades = grades.stream()
+            .map(Grade::new)
+            .toList();
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public List<Grade> getGrades() {
+        return grades.stream()
+            .map(Grade::new)
+            .toList();
+    }
+}
+```
+
+**How to explain it in interview:**
+“The class is `final`, fields are `private final`, there are no setters, constructor inputs are validated, and mutable collections are copied. If the list contains immutable elements like `String`, `List.copyOf()` is usually enough. If the list contains mutable objects, I deep-copy each element in the constructor and getter.”
+
+### 3) Use `HashMap.computeIfAbsent`
+
+**Prompt:** Group employee names by department.
+
+```java
+Map<String, List<String>> employeesByDepartment = new HashMap<>();
+
+for (EmployeeDto employee : employees) {
+    employeesByDepartment
+        .computeIfAbsent(employee.department(), key -> new ArrayList<>())
+        .add(employee.name());
+}
+```
+
+**How to explain it in interview:**
+“`computeIfAbsent` checks whether the key already exists. If not, it creates the value once and stores it. It avoids verbose `containsKey/get/put` code and is a clean pattern for grouping. For concurrent counters, I would use `ConcurrentHashMap` with `LongAdder`.”
+
+### 4) Explain Redis integration in Spring Boot
 
-## Core DI & Lifecycle
+**Prompt:** How would you add Redis caching to a Spring Boot service?
 
-- `@Configuration` + `@Bean` vs component scanning; explicit > implicit.
-- Bean lifecycle: post-processors → `@PostConstruct`/`InitializingBean` → `SmartLifecycle`.
-- Scope: singleton (default), prototype, request/session (web).
+**Answer:**
+- Add `spring-boot-starter-cache` and `spring-boot-starter-data-redis`.
+- Enable caching with `@EnableCaching`.
+- Configure Redis host, TTL, serialization, and null-caching behavior.
+- Use `@Cacheable` for reads, `@CachePut` for updates, and `@CacheEvict` for deletes.
+- Use `StringRedisTemplate` directly for counters, rate limits, locks, and Redis-specific structures.
+- In production, monitor hit ratio, latency, memory usage, evictions, and key cardinality.
 
-
-
-## AOP & Transactional Sınırları
-
-- Proxy tabanlı: **self-invocation** tuzağı (aynı bean içinden çağrı → advice çalışmaz).
-- `@Transactional` sadece **public** methodlarda ve proxy üzerinden etkin.
-
-
-
-## Validation & Binding
-
-- `@ConfigurationProperties` + `@Validated` ile typed config.
-- Controller girişinde `@Valid`; method seviyesinde `@Validated`.
-
-
-
-## Events & Observers
-
-- `ApplicationEventPublisher` ile domain event köprüsü (outbox’a giden yol).
-- Async event için `@Async` + ayrı executor.
-
-
-
-## Profiles & Conditional Beans
-
-- `@Profile("prod")`/`@ConditionalOnProperty` ile çevresel varyantlar.
-- Default değerleri güvenli belirle; fail-fast yapılandır.
-
-
-
-# Spring Boot Microservices — Senior Developer Edition
-
-
-
-
-## Health & Metrics
-
-- Actuator: health groups, readiness/liveness; Micrometer → Prometheus.
-- Golden signals: latency p95/p99, error rate, saturation.
-
-
-
-## HTTP Client (WebClient)
-
-- Connect/read timeouts, pool limits; Resilience4j ile timeout/retry/circuit.
-
-
-
-## Containerization
-
-- Layered jars; distroless image; read-only FS; non-root user.
-
-
-
-## Kafka
-
-- Topics/partitions/offsets; consumer groups ve rebalance.
-- Idempotent producer + transactions (EOS).
-- Retry topics + DLT; schema registry ile evrim.
-
-
-
-## Spring Cache
-
-- @Cacheable/@Put/@Evict; transaction-aware proxy.
-
-
-
-## Redis
-
-- Json serializer; Pub/Sub invalidation; cluster/sentinel.
-
-
-
-## Patterns
-
-- Negative cache, jitter TTL, single-flight.
-
-
-
-## Mappings
-
-- LAZY varsayılan; ManyToOne'u LAZY yap.
-- ManyToMany yerine join entity.
-
-
-
-## N+1 Önleme
-
-- fetch join, entity graph, batch size.
-
-
-
-## Transactions & Locking
-
-- @Transactional sınırları, optimistic/pessimistic.
-
-
-
-## Backpressure
-
-- Queues, bulkheads, timeouts, circuit breakers.
-
-
-
-## Release
-
-- Blue/green, canary, rolling; DB forward/backward compatible.
-
-
-
-## Packaging
-
-- package-by-feature + ports/adapters.
-
-
-
-## Exceptions
-
-- Domain → unchecked; map to problem details.
-
-
-
-## Logging
-
-- JSON logs, MDC correlation ids.
-
-
-
-## Testing
-
-- Unit/slice/integration/e2e pyramid.

@@ -21,42 +21,42 @@ This section covers **asynchronous messaging** with **RabbitMQ** and **Apache Ka
 @Configuration
 class RabbitTopologyConfig {
 
-    public static final String EXCHANGE = "orders.ex";
-    public static final String QUEUE = "orders.q";
-    public static final String DLX = "orders.dlx";
-    public static final String DLQ = "orders.dlq";
+  public static final String EXCHANGE = "orders.ex";
+  public static final String QUEUE = "orders.q";
+  public static final String DLX = "orders.dlx";
+  public static final String DLQ = "orders.dlq";
 
-    @Bean
-    DirectExchange ordersExchange() { return ExchangeBuilder.directExchange(EXCHANGE).durable(true).build(); }
+  @Bean
+  DirectExchange ordersExchange() { return ExchangeBuilder.directExchange(EXCHANGE).durable(true).build(); }
 
-    @Bean
-    DirectExchange deadLetterExchange() { return ExchangeBuilder.directExchange(DLX).durable(true).build(); }
+  @Bean
+  DirectExchange deadLetterExchange() { return ExchangeBuilder.directExchange(DLX).durable(true).build(); }
 
-    @Bean
-    Queue ordersQueue() {
-        return QueueBuilder.durable(QUEUE)
+  @Bean
+  Queue ordersQueue() {
+    return QueueBuilder.durable(QUEUE)
             .withArgument("x-dead-letter-exchange", DLX)
             .withArgument("x-dead-letter-routing-key", "orders.dead")
             .build();
-    }
+  }
 
-    @Bean
-    Queue ordersDlq() { return QueueBuilder.durable(DLQ).build(); }
+  @Bean
+  Queue ordersDlq() { return QueueBuilder.durable(DLQ).build(); }
 
-    @Bean
-    Binding bindOrders() { return BindingBuilder.bind(ordersQueue()).to(ordersExchange()).with("orders.created"); }
+  @Bean
+  Binding bindOrders() { return BindingBuilder.bind(ordersQueue()).to(ordersExchange()).with("orders.created"); }
 
-    @Bean
-    Binding bindDlq() { return BindingBuilder.bind(ordersDlq()).to(deadLetterExchange()).with("orders.dead"); }
+  @Bean
+  Binding bindDlq() { return BindingBuilder.bind(ordersDlq()).to(deadLetterExchange()).with("orders.dead"); }
 }
 ```
 
 ### TTL, Delays, Retry & DLQ
 - Use **per-message TTL** or **per-queue TTL** to implement delays.
 - Retry strategy:
-    1) Consumer NACK → requeue to **retry queue** with TTL.
-    2) After TTL, message returns to main queue.
-    3) After **max attempts**, route to **DLQ** (poison messages).
+  1) Consumer NACK → requeue to **retry queue** with TTL.
+  2) After TTL, message returns to main queue.
+  3) After **max attempts**, route to **DLQ** (poison messages).
 
 ```yaml
 spring:
@@ -76,13 +76,13 @@ spring:
 ```java
 @Bean
 RabbitTemplate rabbitTemplate(ConnectionFactory cf) {
-    var tpl = new RabbitTemplate(cf);
-    tpl.setMandatory(true);
-    tpl.setConfirmCallback((correlation, ack, cause) -> {
-        if (!ack) log.error("Publish not confirmed: {}", cause);
-    });
-    tpl.setReturnsCallback(ret -> log.error("Unroutable message: {}", ret));
-    return tpl;
+  var tpl = new RabbitTemplate(cf);
+  tpl.setMandatory(true);
+  tpl.setConfirmCallback((correlation, ack, cause) -> {
+    if (!ack) log.error("Publish not confirmed: {}", cause);
+  });
+  tpl.setReturnsCallback(ret -> log.error("Unroutable message: {}", ret));
+  return tpl;
 }
 ```
 
@@ -90,21 +90,21 @@ RabbitTemplate rabbitTemplate(ConnectionFactory cf) {
 ```java
 @RabbitListener(queues = RabbitTopologyConfig.QUEUE, concurrency = "3-10")
 public void onMessage(Message msg, Channel channel) throws IOException {
-    var deliveryTag = msg.getMessageProperties().getDeliveryTag();
-    try {
-        var eventId = msg.getMessageProperties().getHeader("eventId");
-        if (dedupStore.isProcessed(eventId)) {
-            channel.basicAck(deliveryTag, false); // idempotent ack
-            return;
-        }
-        handle(msg);
-        dedupStore.markProcessed(eventId);
-        channel.basicAck(deliveryTag, false);
-    } catch (TransientException e) {
-        channel.basicNack(deliveryTag, false, true); // requeue
-    } catch (Exception e) {
-        channel.basicReject(deliveryTag, false); // to DLQ via DLX
+  var deliveryTag = msg.getMessageProperties().getDeliveryTag();
+  try {
+    var eventId = msg.getMessageProperties().getHeader("eventId");
+    if (dedupStore.isProcessed(eventId)) {
+      channel.basicAck(deliveryTag, false); // idempotent ack
+      return;
     }
+    handle(msg);
+    dedupStore.markProcessed(eventId);
+    channel.basicAck(deliveryTag, false);
+  } catch (TransientException e) {
+    channel.basicNack(deliveryTag, false, true); // requeue
+  } catch (Exception e) {
+    channel.basicReject(deliveryTag, false); // to DLQ via DLX
+  }
 }
 ```
 
@@ -141,20 +141,20 @@ spring:
 ```java
 @Service
 public class PaymentPublisher {
-    private final KafkaTemplate<String, PaymentEvent> kafka;
+  private final KafkaTemplate<String, PaymentEvent> kafka;
 
-    public PaymentPublisher(KafkaTemplate<String, PaymentEvent> kafka) {
-        this.kafka = kafka;
-        this.kafka.setTransactionIdPrefix("payments-");
-    }
+  public PaymentPublisher(KafkaTemplate<String, PaymentEvent> kafka) {
+    this.kafka = kafka;
+    this.kafka.setTransactionIdPrefix("payments-");
+  }
 
-    @Transactional("kafkaTransactionManager") // Spring for Kafka TM
-    public void publish(PaymentEvent evt) {
-        kafka.executeInTransaction(kt -> {
-            kt.send("payments", evt.orderId(), evt);
-            return true;
-        });
-    }
+  @Transactional("kafkaTransactionManager") // Spring for Kafka TM
+  public void publish(PaymentEvent evt) {
+    kafka.executeInTransaction(kt -> {
+      kt.send("payments", evt.orderId(), evt);
+      return true;
+    });
+  }
 }
 ```
 
@@ -176,14 +176,14 @@ spring:
 ```java
 @KafkaListener(topics = "payments", concurrency = "3")
 public void onMessage(ConsumerRecord<String, PaymentEvent> r, Acknowledgment ack) {
-    try {
-        // process
-        ack.acknowledge(); // commit offset after success
-    } catch (TransientException e) {
-        // retry/park
-    } catch (Exception e) {
-        // send to DLT
-    }
+  try {
+    // process
+    ack.acknowledge(); // commit offset after success
+  } catch (TransientException e) {
+    // retry/park
+  } catch (Exception e) {
+    // send to DLT
+  }
 }
 ```
 
@@ -205,15 +205,15 @@ spring:
 @Component
 @RequiredArgsConstructor
 class RetryHandler {
-    private final KafkaTemplate<String, PaymentEvent> kafka;
+  private final KafkaTemplate<String, PaymentEvent> kafka;
 
-    void retry(PaymentEvent evt, String topic) {
-        kafka.send(topic, evt.orderId(), evt);
-    }
+  void retry(PaymentEvent evt, String topic) {
+    kafka.send(topic, evt.orderId(), evt);
+  }
 
-    void deadLetter(PaymentEvent evt) {
-        kafka.send("payments-dlt", evt.orderId(), evt);
-    }
+  void deadLetter(PaymentEvent evt) {
+    kafka.send("payments-dlt", evt.orderId(), evt);
+  }
 }
 ```
 
@@ -233,10 +233,10 @@ class RetryHandler {
 StreamsBuilder b = new StreamsBuilder();
 KStream<String, PaymentEvent> stream = b.stream("payments");
 stream
-  .groupByKey()
+        .groupByKey()
   .windowedBy(TimeWindows.ofSizeWithNoGrace(Duration.ofMinutes(1)))
-  .count(Materialized.as("payments-counts"))
-  .toStream()
+        .count(Materialized.as("payments-counts"))
+        .toStream()
   .to("payments-aggregates");
 ```
 
@@ -271,7 +271,7 @@ stream
 
 ### Exactly-Once with Kafka + DB
 - Use Kafka transactions to write to a topic **and** a DB in one logical unit:
-    - **Consume** → process → **produce** (or write DB) → **commit offsets** transactionally.
+  - **Consume** → process → **produce** (or write DB) → **commit offsets** transactionally.
 
 ---
 

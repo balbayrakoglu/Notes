@@ -236,3 +236,48 @@ logging:
 - Feature flags and safe rollouts.
 
 ---
+
+## Design a scalable payment system
+
+**1. Requirements**
+- Users can create payments.
+- Payments must not be duplicated.
+- System should be reliable, observable, and scalable.
+- Strong consistency is needed for payment state and balance-related logic.
+
+**2. API Layer**
+- POST /payments
+- Client sends Idempotency-Key.
+- API Gateway handles auth, rate limiting, request validation.
+
+**3. Payment Service**
+- Checks idempotency table.
+- Creates payment in DB transaction.
+- Stores outbox event in the same transaction.
+- Returns accepted/created response.
+
+**4. Database**
+- PostgreSQL for payment records.
+- Unique constraint on idempotency key.
+- Payment states: CREATED, PROCESSING, COMPLETED, FAILED.
+
+**5. Eventing**
+- Outbox table is published to Kafka using CDC or polling.
+- Downstream services consume PaymentCreated events.
+- Consumers use inbox/dedup table for idempotency.
+
+**6. Resilience**
+- Timeout external PSP calls.
+- Retry only transient failures.
+- Circuit breaker for PSP.
+- DLQ for poison messages.
+
+**7. Observability**
+- Metrics: payment success rate, latency, failure rate, Kafka lag.
+- Logs with correlationId/paymentId.
+- Distributed tracing across services.
+
+**8. Deployment**
+- Rolling/canary deployment.
+- Backward-compatible DB migrations.
+- Feature flags for risky changes.

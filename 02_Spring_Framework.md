@@ -17,13 +17,13 @@ Spring manages object creation and wiring via the **IoC Container** (typically `
 ```java
 @Service
 public class PaymentService {
-    private final PaymentGateway gateway;
-    private final FraudChecker fraudChecker; // optional
+  private final PaymentGateway gateway;
+  private final FraudChecker fraudChecker; // optional
 
-    public PaymentService(PaymentGateway gateway, @Autowired(required = false) FraudChecker fraudChecker) {
-        this.gateway = gateway;
-        this.fraudChecker = fraudChecker;
-    }
+  public PaymentService(PaymentGateway gateway, @Autowired(required = false) FraudChecker fraudChecker) {
+    this.gateway = gateway;
+    this.fraudChecker = fraudChecker;
+  }
 }
 ```
 
@@ -36,8 +36,8 @@ public class PaymentService {
 @Configuration(proxyBeanMethods = false)
 @ComponentScan(basePackages = "com.example")
 public class AppConfig {
-    @Bean
-    public Clock systemClock() { return Clock.systemUTC(); }
+  @Bean
+  public Clock systemClock() { return Clock.systemUTC(); }
 }
 ```
 
@@ -48,7 +48,7 @@ public class AppConfig {
 ```java
 @Service
 public class ReportService {
-    public ReportService(@Qualifier("fastClient") ExternalClient client) { /*...*/ }
+  public ReportService(@Qualifier("fastClient") ExternalClient client) { /*...*/ }
 }
 ```
 
@@ -69,11 +69,11 @@ public class ReportService {
 ```java
 @Component
 public class WarmupCache {
-    @PostConstruct
-    void warmup() { /* preload cache */ }
+  @PostConstruct
+  void warmup() { /* preload cache */ }
 
-    @PreDestroy
-    void cleanup() { /* flush/close resources */ }
+  @PreDestroy
+  void cleanup() { /* flush/close resources */ }
 }
 ```
 
@@ -81,10 +81,10 @@ public class WarmupCache {
 
 ### Circular Dependencies
 - Caused by mutual constructor injection (A→B, B→A). Strategies:
-    - Refactor to break cycles (extract ports/interfaces).
-    - Use setter injection for *one side* (last resort).
-    - Introduce orchestrator/service that coordinates both.
-    - `@Lazy` can break cycles but may hide design issues.
+  - Refactor to break cycles (extract ports/interfaces).
+  - Use setter injection for *one side* (last resort).
+  - Introduce orchestrator/service that coordinates both.
+  - `@Lazy` can break cycles but may hide design issues.
 
 ---
 
@@ -100,10 +100,10 @@ public record PaymentProps(Duration timeout, BigDecimal maxAmount, URI endpoint)
 @EnableConfigurationProperties(PaymentProps.class)
 class PaymentConfig {
 
-    @Bean
-    PaymentClient paymentClient(PaymentProps props) {
-        return new PaymentClient(props.endpoint(), props.timeout());
-    }
+  @Bean
+  PaymentClient paymentClient(PaymentProps props) {
+    return new PaymentClient(props.endpoint(), props.timeout());
+  }
 }
 ```
 
@@ -114,8 +114,8 @@ class PaymentConfig {
 @Validated
 @ConfigurationProperties("service")
 public record ServiceProps(
-    @NotBlank String apiKey,
-    @Min(1) int poolSize
+        @NotBlank String apiKey,
+        @Min(1) int poolSize
 ) { }
 ```
 
@@ -138,17 +138,17 @@ AOP modularizes cross-cutting concerns (logging, security, transactions). Spring
 @Component
 public class LoggingAspect {
 
-    @Around("execution(* com.example..service..*(..))")
-    public Object log(ProceedingJoinPoint pjp) throws Throwable {
-        long t0 = System.nanoTime();
-        try {
-            return pjp.proceed();
-        } finally {
-            long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
-            log.info("{}.{} took {} ms", pjp.getSignature().getDeclaringTypeName(),
-                                  pjp.getSignature().getName(), elapsedMs);
-        }
+  @Around("execution(* com.example..service..*(..))")
+  public Object log(ProceedingJoinPoint pjp) throws Throwable {
+    long t0 = System.nanoTime();
+    try {
+      return pjp.proceed();
+    } finally {
+      long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
+      log.info("{}.{} took {} ms", pjp.getSignature().getDeclaringTypeName(),
+              pjp.getSignature().getName(), elapsedMs);
     }
+  }
 }
 ```
 
@@ -167,8 +167,8 @@ Supports **declarative** (`@Transactional`) and **programmatic** (`TransactionTe
 ```java
 @Service
 public class OrderService {
-    @Transactional // default: Propagation.REQUIRED
-    public void placeOrder(OrderRequest req) { /* write ops */ }
+  @Transactional // default: Propagation.REQUIRED
+  public void placeOrder(OrderRequest req) { /* write ops */ }
 }
 ```
 
@@ -206,18 +206,18 @@ public class OrderService {
 ```java
 @Service
 public class BillingService {
-    private final TransactionTemplate tx;
+  private final TransactionTemplate tx;
 
-    public BillingService(PlatformTransactionManager ptm) {
-        this.tx = new TransactionTemplate(ptm);
-    }
+  public BillingService(PlatformTransactionManager ptm) {
+    this.tx = new TransactionTemplate(ptm);
+  }
 
-    public Receipt bill(Order order) {
-        return tx.execute(status -> {
-            // do work; status.setRollbackOnly() if needed
-            return createReceipt(order);
-        });
-    }
+  public Receipt bill(Order order) {
+    return tx.execute(status -> {
+      // do work; status.setRollbackOnly() if needed
+      return createReceipt(order);
+    });
+  }
 }
 ```
 
@@ -237,19 +237,19 @@ public record OrderPlacedEvent(UUID orderId) { }
 
 @Service
 public class OrderAppService {
-    private final ApplicationEventPublisher publisher;
-    public OrderAppService(ApplicationEventPublisher publisher) { this.publisher = publisher; }
-    public void place(Order order) {
-        // ... domain logic
-        publisher.publishEvent(new OrderPlacedEvent(order.id()));
-    }
+  private final ApplicationEventPublisher publisher;
+  public OrderAppService(ApplicationEventPublisher publisher) { this.publisher = publisher; }
+  public void place(Order order) {
+    // ... domain logic
+    publisher.publishEvent(new OrderPlacedEvent(order.id()));
+  }
 }
 
 @Component
 class Notifications {
-    @EventListener
-    @Async // optional (requires @EnableAsync)
-    public void onOrderPlaced(OrderPlacedEvent e) { /* send email */ }
+  @EventListener
+  @Async // optional (requires @EnableAsync)
+  public void onOrderPlaced(OrderPlacedEvent e) { /* send email */ }
 }
 ```
 
@@ -264,19 +264,19 @@ Use **Jakarta Bean Validation** (JSR 380/381) with Spring MVC/Service layers.
 
 ```java
 public record CreateUserReq(
-    @NotBlank String email,
-    @Size(min = 8) String password
+        @NotBlank String email,
+        @Size(min = 8) String password
 ) { }
 
 @RestController
 @RequestMapping("/users")
 public class UserController {
 
-    @PostMapping
-    public ResponseEntity<Void> create(@Valid @RequestBody CreateUserReq req) {
-        // ...
-        return ResponseEntity.ok().build();
-    }
+  @PostMapping
+  public ResponseEntity<Void> create(@Valid @RequestBody CreateUserReq req) {
+    // ...
+    return ResponseEntity.ok().build();
+  }
 }
 ```
 
@@ -292,18 +292,18 @@ Centralize REST error handling with `@ControllerAdvice` and `@ExceptionHandler`.
 @RestControllerAdvice
 public class GlobalErrors {
 
-    @ExceptionHandler(BusinessException.class)
-    ResponseEntity<ApiError> onBusiness(BusinessException ex) {
-        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
-                             .body(new ApiError("BUSINESS_ERROR", ex.getMessage()));
-    }
+  @ExceptionHandler(BusinessException.class)
+  ResponseEntity<ApiError> onBusiness(BusinessException ex) {
+    return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+            .body(new ApiError("BUSINESS_ERROR", ex.getMessage()));
+  }
 
-    @ExceptionHandler(MethodArgumentNotValidException.class)
-    ResponseEntity<ApiError> onValidation(MethodArgumentNotValidException ex) {
-        var field = ex.getBindingResult().getFieldError();
-        return ResponseEntity.badRequest()
+  @ExceptionHandler(MethodArgumentNotValidException.class)
+  ResponseEntity<ApiError> onValidation(MethodArgumentNotValidException ex) {
+    var field = ex.getBindingResult().getFieldError();
+    return ResponseEntity.badRequest()
             .body(new ApiError("VALIDATION_ERROR", field != null ? field.getDefaultMessage() : "Invalid request"));
-    }
+  }
 }
 ```
 
@@ -317,13 +317,13 @@ Use **profiles** to switch beans/configuration per environment.
 @Profile("prod")
 @Configuration
 class ProdConfig {
-    @Bean DataSource ds() { /* prod datasource */ }
+  @Bean DataSource ds() { /* prod datasource */ }
 }
 
 @Profile("dev")
 @Configuration
 class DevConfig {
-    @Bean DataSource ds() { /* h2 or local */ }
+  @Bean DataSource ds() { /* h2 or local */ }
 }
 ```
 
@@ -349,15 +349,15 @@ class DevConfig {
 ```java
 @WebMvcTest(UserController.class)
 class UserControllerTest {
-    @Autowired MockMvc mvc;
+  @Autowired MockMvc mvc;
 
-    @Test
-    void createsUser() throws Exception {
-        mvc.perform(post("/users")
+  @Test
+  void createsUser() throws Exception {
+    mvc.perform(post("/users")
             .contentType(MediaType.APPLICATION_JSON)
             .content("{"email":"a@b.com","password":"12345678"}"))
             .andExpect(status().isOk());
-    }
+  }
 }
 ```
 

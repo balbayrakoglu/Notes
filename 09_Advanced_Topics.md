@@ -77,8 +77,8 @@ public interface UserMapper {
 @Mapper(componentModel = "spring", uses = { MoneyMapper.class, AddressMapper.class })
 public interface OrderMapper {
     @Mappings({
-        @Mapping(target = "total", source = "totalMinor", qualifiedByName = "minorToMoney"),
-        @Mapping(target = "address.line", source = "addressLine")
+            @Mapping(target = "total", source = "totalMinor", qualifiedByName = "minorToMoney"),
+            @Mapping(target = "address.line", source = "addressLine")
     })
     Order toEntity(OrderDto dto);
 }
@@ -126,8 +126,8 @@ public interface PatchMapper {
 ### Rate Limiting with Redis
 ```java
 DefaultRedisScript<Long> script = new DefaultRedisScript<>(
-  "local tokens=redis.call('get',KEYS[1]) or 0; " +
-  "if tonumber(tokens) > 0 then return redis.call('decr',KEYS[1]) else return -1 end", Long.class);
+        "local tokens=redis.call('get',KEYS[1]) or 0; " +
+                "if tonumber(tokens) > 0 then return redis.call('decr',KEYS[1]) else return -1 end", Long.class);
 Long ok = stringRedisTemplate.execute(script, List.of("rl:user:42"), List.of());
 ```
 
@@ -211,10 +211,10 @@ public void charge(ExternalTask task, ExternalTaskService svc) {
 
 ```sql
 CREATE TABLE saga_instance (
-  id uuid primary key,
-  name text not null,
-  state jsonb not null,
-  updated_at timestamptz not null default now()
+                               id uuid primary key,
+                               name text not null,
+                               state jsonb not null,
+                               updated_at timestamptz not null default now()
 );
 ```
 
@@ -234,19 +234,19 @@ h.add("traceparent", currentTraceparent().getBytes(StandardCharsets.UTF_8));
 ### Custom Spans & Attributes
 ```java
 Span span = tracer.spanBuilder("chargePayment")
-    .setSpanKind(SpanKind.INTERNAL)
-    .startSpan();
+        .setSpanKind(SpanKind.INTERNAL)
+        .startSpan();
 try (var scope = span.makeCurrent()) {
-    span.setAttribute("order.id", orderId);
+        span.setAttribute("order.id", orderId);
     span.setAttribute("amount", amount.doubleValue());
-    charge();
+charge();
     span.setStatus(StatusCode.OK);
 } catch (Exception e) {
-    span.recordException(e);
+        span.recordException(e);
     span.setStatus(StatusCode.ERROR);
     throw e;
 } finally {
-    span.end();
+        span.end();
 }
 ```
 

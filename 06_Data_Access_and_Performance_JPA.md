@@ -143,12 +143,12 @@ spring.jpa.properties.hibernate.order_updates=true
 
 ```java
 for (int i = 0; i < items.size(); i++) {
-    em.persist(items.get(i));
-    if (i % 50 == 0) {
+        em.persist(items.get(i));
+        if (i % 50 == 0) {
         em.flush(); // push to JDBC
         em.clear(); // detach to avoid memory bloat
     }
-}
+            }
 ```
 
 ### Bulk JPQL (no entity lifecycle events)
@@ -191,10 +191,10 @@ public class OrderService {
 
 ```java
 try {
-   repo.save(entity);
+        repo.save(entity);
 } catch (ObjectOptimisticLockingFailureException e) {
-   // retry or surface conflict to client
-}
+        // retry or surface conflict to client
+        }
 ```
 
 ### Pessimistic (when contention is real)
@@ -266,7 +266,7 @@ CREATE INDEX ix_order_status_open ON orders (created_at) WHERE status = 'OPEN';
 
 ```java
 @Query(value = "select * from orders where customer_id = :cid order by created_at desc limit :n",
-       nativeQuery = true)
+        nativeQuery = true)
 List<Order> lastOrders(@Param("cid") UUID cid, @Param("n") int n);
 ```
 
