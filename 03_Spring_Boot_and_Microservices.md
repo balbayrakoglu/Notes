@@ -218,34 +218,714 @@ Use **Debezium** to capture DB changes and publish to Kafka — eliminates sched
 
 ---
 
-## Saga Pattern (Distributed Transactions)
+# Saga Pattern — Distributed Transactions
 
-### Orchestration
-A central **Orchestrator** coordinates steps and **compensations**.
+## Overview
 
-```java
-public void createOrderSaga(CreateOrder cmd) {
-    try {
-        reserveInventory(cmd);
-        chargePayment(cmd);
-        confirmOrder(cmd);
-    } catch (Exception ex) {
-        refundPayment(cmd);
-        releaseInventory(cmd);
-    }
-}
-// On failure -> run compensations: refundPayment(), releaseInventory()
-```
+The **Saga Pattern** is used to manage distributed transactions across multiple microservices.
 
-### Choreography
-Services emit/subscribe to domain events; **no central coordinator**.  
-Keep steps small; avoid cyclic event storms. Use correlation IDs.
+In a monolithic application, one database transaction can usually handle the full business operation. In a microservice architecture, each service owns its own database. Because of that, one global `@Transactional` boundary cannot safely cover all services.
 
-**Choose**
-- Orchestration for complex, multi-step flows.
-- Choreography for simple, loosely-coupled flows.
+Instead of using one large distributed transaction, Saga breaks the business process into multiple **local transactions**.
+
+Each service performs its own local transaction and then triggers the next step by publishing an event or receiving a command.
+
+If one step fails, the system runs **compensation actions** for the previous successful steps.
+
+> Saga does not perform a technical rollback across services.  
+> Saga performs business-level compensation.
 
 ---
+
+## Simple Example
+
+Successful flow:
+
+```text
+Create Order
+    ↓
+Reserve Inventory
+    ↓
+Charge Payment
+    ↓
+Confirm Order
+```
+
+Failure flow:
+
+```text
+Create Order
+    ↓
+Reserve Inventory
+    ↓
+Payment Failed
+    ↓
+Release Inventory
+    ↓
+Cancel Order
+```
+
+In this case, `Release Inventory` and `Cancel Order` are compensation actions.
+
+---
+
+## Why Saga Is Needed
+
+Assume we have these services:
+
+```text
+Order Service       → order_db
+Inventory Service   → inventory_db
+Payment Service     → payment_db
+Shipping Service    → shipping_db
+```
+
+A common mistake is thinking this works as one transaction:
+
+```java
+@Transactional
+public void createOrder(CreateOrderCommand command) {
+    orderRepository.save(command.toOrder());
+
+    inventoryClient.reserveInventory(command);
+    paymentClient.chargePayment(command);
+}
+```
+
+The problem is that `@Transactional` only manages the local database transaction of the current service.
+
+It cannot rollback changes made inside:
+
+```text
+Inventory Service
+Payment Service
+Shipping Service
+```
+
+So if the payment call fails after inventory is reserved, the system needs a separate business action to release the inventory.
+
+That is where Saga helps.
+
+---
+
+## Local Transaction vs Distributed Transaction
+
+### Local Transaction
+
+A **local transaction** belongs to one service and one database.
+
+Example:
+
+```text
+Order Service saves order into order_db
+```
+
+### Distributed Transaction
+
+A **distributed transaction** tries to coordinate multiple services and databases as one transaction.
+
+Example:
+
+```text
+Order DB + Inventory DB + Payment DB
+```
+
+In microservices, distributed transactions are usually avoided because they increase coupling, complexity, latency, and operational risk.
+
+Saga is a more practical alternative for most business workflows.
+
+---
+
+## Compensation Is Not Rollback
+
+This is one of the most important Saga details.
+
+Rollback means:
+
+```text
+Undo database changes inside the same transaction
+```
+
+Compensation means:
+
+```text
+Run another business operation to correct or reverse a previous action
+```
+
+Examples:
+
+```text
+Payment charged       → Refund payment
+Inventory reserved    → Release inventory
+Order created         → Cancel order
+```
+
+Compensation actions must also be **idempotent**, because they may be retried.
+
+Example:
+
+```java
+public void releaseInventory(String orderId) {
+    Reservation reservation = reservationRepository.findByOrderId(orderId);
+
+    if (reservation.isReleased()) {
+        return;
+    }
+
+    reservation.release();
+    reservationRepository.save(reservation);
+}
+```
+
+If the same compensation command is received twice, the system should not release inventory twice.
+
+---
+
+## Saga Styles
+
+There are two common Saga styles:
+
+1. **Orchestration**
+2. **Choreography**
+
+---
+
+# Orchestration
+
+## What Is Orchestration?
+
+In **Orchestration**, a central component controls the workflow.
+
+This component is usually called:
+
+```text
+Saga Orchestrator
+Process Manager
+Workflow Coordinator
+```
+
+The orchestrator decides:
+
+```text
+Which step should run next
+What should happen on success
+What should happen on failure
+Which compensation should be triggered
+When to retry
+When to mark the Saga as failed
+```
+
+---
+
+## Orchestration Code Example
+
+```java
+public void createOrderSaga(CreateOrderCommand command) {
+    try {
+        Order order = orderService.createOrder(command);
+
+        inventoryService.reserveInventory(order);
+
+        paymentService.chargePayment(order);
+
+        orderService.confirmOrder(order);
+
+    } catch (Exception ex) {
+        paymentService.refundPayment(command);
+        inventoryService.releaseInventory(command);
+        orderService.cancelOrder(command);
+    }
+}
+```
+
+This code explains the idea, but production systems usually need a persistent Saga state.
+
+---
+
+## Orchestration Successful Flow
+
+```text
+1. Order Service creates an order with PENDING status
+2. Orchestrator sends ReserveInventory command
+3. Inventory Service reserves stock
+4. Orchestrator receives InventoryReserved event
+5. Orchestrator sends ChargePayment command
+6. Payment Service charges the customer
+7. Orchestrator receives PaymentCharged event
+8. Orchestrator sends ConfirmOrder command
+9. Order becomes CONFIRMED
+```
+
+---
+
+## Orchestration Failure Flow
+
+```text
+1. Order is created
+2. Inventory is reserved
+3. Payment fails
+4. Orchestrator starts compensation
+5. Orchestrator sends ReleaseInventory command
+6. Inventory is released
+7. Order becomes CANCELLED
+```
+
+---
+
+## Saga State Table
+
+For orchestration, storing Saga state is very important.
+
+Example table:
+
+```text
+saga_id
+order_id
+status
+current_step
+retry_count
+last_error
+created_at
+updated_at
+```
+
+Example statuses:
+
+```java
+public enum SagaStatus {
+    STARTED,
+    ORDER_CREATED,
+    INVENTORY_RESERVED,
+    PAYMENT_CHARGED,
+    ORDER_CONFIRMED,
+    COMPENSATING,
+    COMPENSATED,
+    FAILED
+}
+```
+
+Example records:
+
+```text
+saga_id    order_id    status              current_step
+SAGA-1     ORD-1       PAYMENT_CHARGED     CONFIRM_ORDER
+SAGA-2     ORD-2       COMPENSATING        RELEASE_INVENTORY
+SAGA-3     ORD-3       FAILED              PAYMENT
+```
+
+This gives visibility into long-running business processes.
+
+---
+
+## Orchestration Pros
+
+```text
++ Easier to understand
++ Central workflow visibility
++ Easier debugging
++ Better retry handling
++ Better compensation handling
++ Good for complex business flows
++ Easier auditability
+```
+
+---
+
+## Orchestration Cons
+
+```text
+- The orchestrator can become too large
+- Risk of creating a "god service"
+- More process-level coupling
+- Orchestrator must be highly reliable
+```
+
+---
+
+# Choreography
+
+## What Is Choreography?
+
+In **Choreography**, there is no central orchestrator.
+
+Each service reacts to events and publishes new events.
+
+Example:
+
+```text
+Order Service publishes OrderCreated
+Inventory Service listens and reserves stock
+Payment Service listens and charges payment
+Shipping Service listens and prepares delivery
+```
+
+---
+
+## Choreography Successful Flow
+
+```text
+OrderCreated
+    ↓
+InventoryReserved
+    ↓
+PaymentCharged
+    ↓
+OrderConfirmed
+```
+
+---
+
+## Choreography Failure Flow
+
+```text
+OrderCreated
+    ↓
+InventoryReserved
+    ↓
+PaymentFailed
+    ↓
+InventoryReleased
+    ↓
+OrderCancelled
+```
+
+---
+
+## Choreography Code Example
+
+Inventory service:
+
+```java
+@KafkaListener(topics = "order-created")
+public void handle(OrderCreatedEvent event) {
+    inventoryService.reserve(event.orderId(), event.items());
+
+    kafkaTemplate.send(
+        "inventory-reserved",
+        new InventoryReservedEvent(event.orderId())
+    );
+}
+```
+
+Payment service:
+
+```java
+@KafkaListener(topics = "inventory-reserved")
+public void handle(InventoryReservedEvent event) {
+    try {
+        paymentService.charge(event.orderId());
+
+        kafkaTemplate.send(
+            "payment-charged",
+            new PaymentChargedEvent(event.orderId())
+        );
+
+    } catch (Exception ex) {
+        kafkaTemplate.send(
+            "payment-failed",
+            new PaymentFailedEvent(event.orderId())
+        );
+    }
+}
+```
+
+Compensation listener:
+
+```java
+@KafkaListener(topics = "payment-failed")
+public void handle(PaymentFailedEvent event) {
+    inventoryService.release(event.orderId());
+
+    kafkaTemplate.send(
+        "inventory-released",
+        new InventoryReleasedEvent(event.orderId())
+    );
+}
+```
+
+---
+
+## Choreography Pros
+
+```text
++ No central coordinator
++ Services are loosely coupled
++ Natural fit with event-driven architecture
++ Works well with Kafka
++ Simple for small workflows
+```
+
+---
+
+## Choreography Cons
+
+```text
+- Harder to understand the full flow
+- Harder debugging
+- Event chains can become messy
+- Cyclic dependencies may appear
+- Compensation logic is distributed
+- Harder to monitor complex processes
+```
+
+---
+
+# Orchestration vs Choreography
+
+| Topic | Orchestration | Choreography |
+|---|---|---|
+| Coordinator | Central orchestrator | No central coordinator |
+| Flow visibility | High | Lower |
+| Coupling | Process-level coupling | Event-level coupling |
+| Debugging | Easier | Harder |
+| Compensation | Centralized | Distributed |
+| Best for | Complex workflows | Simple event flows |
+| Risk | God orchestrator | Event chaos |
+
+---
+
+# When to Choose Orchestration
+
+Use orchestration when:
+
+```text
+- The workflow has many steps
+- The business process is complex
+- Compensation logic is important
+- Retry and timeout handling are required
+- Auditability is needed
+- The current state of the process must be visible
+- Debugging and monitoring are important
+```
+
+Example:
+
+```text
+Order
+  → Inventory Reservation
+  → Payment
+  → Fraud Check
+  → Invoice
+  → Shipping
+```
+
+For this kind of flow, orchestration is usually easier to manage.
+
+---
+
+# When to Choose Choreography
+
+Use choreography when:
+
+```text
+- The workflow is simple
+- There are only a few steps
+- Services are naturally event-driven
+- Failure handling is not complex
+- Loose coupling is more important than central visibility
+```
+
+Example:
+
+```text
+UserRegistered
+    ↓
+SendWelcomeEmail
+    ↓
+CreateDefaultSettings
+```
+
+This kind of flow can work well with choreography.
+
+---
+
+# Production Considerations
+
+Saga alone is not enough for a production-grade system.
+
+A real implementation should also consider:
+
+```text
+Idempotency
+Retry mechanism
+Dead Letter Queue
+Outbox Pattern
+Correlation ID
+Saga state table
+Timeout handling
+Compensation tracking
+Observability
+Monitoring and alerting
+```
+
+---
+
+## Idempotency
+
+In event-driven systems, the same event can be consumed more than once.
+
+For example, Kafka provides at-least-once delivery by default in many setups.
+
+That means this can be dangerous:
+
+```java
+public void chargePayment(OrderCreatedEvent event) {
+    paymentService.charge(event.orderId());
+}
+```
+
+If the same event is processed twice, the customer may be charged twice.
+
+Better:
+
+```java
+public void chargePayment(OrderCreatedEvent event) {
+    if (paymentRepository.existsByOrderId(event.orderId())) {
+        return;
+    }
+
+    paymentService.charge(event.orderId());
+}
+```
+
+The operation should be safe to repeat.
+
+---
+
+## Outbox Pattern
+
+A common problem is this:
+
+```text
+Database transaction succeeds
+Kafka publish fails
+```
+
+Example:
+
+```java
+orderRepository.save(order);
+kafkaTemplate.send("order-created", event);
+```
+
+If the order is saved but the event is not published, other services will not know about the order.
+
+The **Outbox Pattern** solves this problem.
+
+Flow:
+
+```text
+1. Save the order
+2. Save the event into an outbox table in the same database transaction
+3. A background publisher reads the outbox table
+4. The publisher sends the event to Kafka
+5. The event is marked as SENT
+```
+
+Example:
+
+```java
+@Transactional
+public void createOrder(CreateOrderCommand command) {
+    Order order = orderRepository.save(Order.create(command));
+
+    outboxRepository.save(
+        OutboxEvent.create(
+            "OrderCreated",
+            order.getId(),
+            toJson(order)
+        )
+    );
+}
+```
+
+This keeps the database write and event creation atomic.
+
+---
+
+## Retry and DLQ
+
+Saga steps can fail because of temporary issues:
+
+```text
+Network timeout
+Payment provider unavailable
+Database lock
+Kafka broker issue
+```
+
+For temporary failures, retry can help.
+
+But retry should not continue forever.
+
+A common approach:
+
+```text
+1. Retry with backoff
+2. If still failing, send to DLQ
+3. Mark Saga as FAILED or WAITING_FOR_MANUAL_REVIEW
+4. Alert the team
+```
+
+Example statuses:
+
+```text
+RETRYING
+FAILED
+WAITING_FOR_MANUAL_REVIEW
+COMPENSATING
+COMPENSATED
+```
+
+---
+
+## Correlation ID
+
+Every Saga should have a correlation ID.
+
+This ID connects logs, events, commands, and database records.
+
+Example:
+
+```text
+correlationId = orderId or sagaId
+```
+
+This helps answer:
+
+```text
+Which events belong to the same business transaction?
+Where did the flow fail?
+Which service processed the event?
+Which compensation was triggered?
+```
+
+---
+
+# Interview Answer
+
+A good interview answer:
+
+> The Saga Pattern is used to manage distributed transactions across microservices. Instead of using one global transaction, each service performs its own local transaction. After a successful step, the next step is triggered by a command or an event. If one step fails, previous successful steps are compensated with business-level rollback actions, such as refunding a payment or releasing inventory. There are two main styles: orchestration and choreography. In orchestration, a central orchestrator controls the workflow, which is better for complex flows. In choreography, services react to events without a central coordinator, which works better for simpler event-driven flows. In production, Saga should be combined with idempotency, retries, DLQ, correlation IDs, observability, and often the Outbox Pattern.
+
+---
+
+# Key Takeaways
+
+```text
+- Saga is used for distributed business transactions
+- Each step is a local transaction
+- Saga does not rollback like a database transaction
+- Saga uses compensation actions
+- Orchestration gives better control and visibility
+- Choreography gives looser coupling
+- Complex workflows usually fit orchestration better
+- Simple event flows can use choreography
+- Idempotency is mandatory
+- Outbox Pattern helps prevent DB and Kafka inconsistency
+- Retry, DLQ, and monitoring are required in production
+```
+
 
 ## Idempotency
 

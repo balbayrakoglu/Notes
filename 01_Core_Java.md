@@ -186,24 +186,41 @@ public final class Employee {
   public String getEmail() {
     return email;
   }
-
+ 
   @Override
-  public boolean equals(Object obj) {
-    if (this == obj) {
+  public boolean equals(Object o) {
+    if (this == o) { // Reference Equality
       return true;
     }
-    if (!(obj instanceof Employee other)) {
+
+    if (o == null || getClass() != o.getClass()) { //Null or type Check. Accepts subsclasses
       return false;
     }
-    return Objects.equals(id, other.id)
-            && Objects.equals(email, other.email);
-  }
 
+    Person other = (Person) o;
+
+    return Objects.equals(id, other.id);
+  }
+  
   @Override
   public int hashCode() {
     return Objects.hash(id, email);
   }
 }
+ 
+//HashCode Implementation
+@Override
+public int hashCode() {
+  int result = 1;
+
+  result = 31 * result + Objects.hashCode(name);
+  result = 31 * result + Objects.hashCode(surname);
+  result = 31 * result + Objects.hashCode(phone);
+
+  return result;
+}
+
+
 ```
 
 ### Interview explanation
