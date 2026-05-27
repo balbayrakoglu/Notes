@@ -208,3 +208,65 @@ for (EmployeeDto employee : employees) {
 - Use `StringRedisTemplate` directly for counters, rate limits, locks, and Redis-specific structures.
 - In production, monitor hit ratio, latency, memory usage, evictions, and key cardinality.
 
+### 5) How do you design Rest Api consistent Error response? 
+
+- I design a single error response contract and enforce it through a global exception handler. 
+- Each error contains an HTTP status, a stable internal error code, a safe user-facing message, request path, timestamp, and correlation ID. 
+- Validation errors can include structured field-level details. 
+- For unexpected errors, I return a generic message to the client and log the full technical details internally with the correlation ID.
+
+**Sample Error body**
+```Json
+{
+"timestamp": "2026-05-26T10:30:00Z",
+  "status": 400,
+  "error": "VALIDATION_ERROR",
+  "message": "Request validation failed",
+  "path": "/api/orders",
+  "correlationId": "8f4f6e2a-1234-45b1-a19d-10ab92c91e22",
+  "details": [
+    {
+    "field": "customer.email",
+    "code": "INVALID_EMAIL",
+    "message": "must be a valid email address",
+    "rejectedValue": "abc"
+    }
+  ]
+}
+```
+
+**SpringBoot centralized Solution**
+```Java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidation(
+            MethodArgumentNotValidException ex,
+            HttpServletRequest request
+    ) {
+        List<FieldErrorDetail> details = ex.getBindingResult()
+                .getFieldErrors()
+                .stream()
+                .map(error -> new FieldErrorDetail(
+                        error.getField(),
+                        error.getCode(),
+                        error.getDefaultMessage(),
+                        error.getRejectedValue()
+                ))
+                .toList();
+
+        ApiErrorResponse response = new ApiErrorResponse(
+                Instant.now(),
+                400,
+                "VALIDATION_ERROR",
+                "Request validation failed",
+                request.getRequestURI(),
+                getCorrelationId(),
+                details
+        );
+
+        return ResponseEntity.badRequest().body(response);
+    }
+}
+```
